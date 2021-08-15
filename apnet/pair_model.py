@@ -1,4 +1,5 @@
 import sys, os
+import multiprocessing
 import math
 import time
 import numpy as np
@@ -10,16 +11,20 @@ import tensorflow as tf
 
 from apnet.keras_pair_model import KerasPairModel
 from apnet import constants
+from multiprocessing import Pool, get_context
 
 class PairDataLoader:
     """ todo """
 
-    def __init__(self, dimers, energies, r_cut, r_cut_im):
+    def __init__(self, dimers, energies, r_cut, r_cut_im, multipose=False):
 
         self.r_cut = r_cut
         self.r_cut_im = r_cut_im
         self.N = len(dimers)
+        self.multipose = multipose
         if energies is not None:
+            print(len(energies))
+            print(self.N)
             assert len(energies) == self.N
 
         self.RA_list = []
@@ -37,35 +42,74 @@ class PairDataLoader:
 
         self.e_ABsr_source_list = []
         self.e_ABsr_target_list = []
-        self.e_ABlr_source_list = []
-        self.e_ABlr_target_list = []
+        #self.e_ABlr_source_list = []
+        #self.e_ABlr_target_list = []
 
-        for ind in range(self.N):
-            
-            dimer = dimers[ind]
+        #with get_context("spawn").Pool() as p:#multiprocessing.cpu_count()) as p:
+        parsed_data = []
+        for dimer in dimers:
+            parsed_data.append(self.multiprocess_loader(dimer))
+        self.RA_list = [parsed_datum[0] for parsed_datum in parsed_data]
+        self.RB_list = [parsed_datum[1] for parsed_datum in parsed_data]
+        self.ZA_list = [parsed_datum[2] for parsed_datum in parsed_data]
+        self.ZB_list = [parsed_datum[3] for parsed_datum in parsed_data]
+        self.total_charge_A_list = [parsed_datum[4] for parsed_datum in parsed_data]
+        self.total_charge_B_list = [parsed_datum[5] for parsed_datum in parsed_data]
 
-            RA, RB, ZA, ZB, total_charge_A, total_charge_B = self.dimer_to_data(dimer)
-            e_AA_source, e_AA_target = self.edges(RA)
-            e_BB_source, e_BB_target = self.edges(RB)
-            e_ABsr_source, e_ABsr_target, e_ABlr_source, e_ABlr_target = self.edges_im(RA, RB)
+        self.e_AA_source_list = [parsed_datum[6] for parsed_datum in parsed_data]
+        self.e_AA_target_list = [parsed_datum[7] for parsed_datum in parsed_data]
 
-            self.RA_list.append(RA)
-            self.RB_list.append(RB)
-            self.ZA_list.append(ZA)
-            self.ZB_list.append(ZB)
-            self.total_charge_A_list.append(total_charge_A)
-            self.total_charge_B_list.append(total_charge_B)
+        self.e_BB_source_list = [parsed_datum[8] for parsed_datum in parsed_data]
+        self.e_BB_target_list = [parsed_datum[9] for parsed_datum in parsed_data]
 
-            self.e_AA_source_list.append(e_AA_source)
-            self.e_AA_target_list.append(e_AA_target)
+        self.e_ABsr_source_list = [parsed_datum[10] for parsed_datum in parsed_data]
+        self.e_ABsr_target_list = [parsed_datum[11] for parsed_datum in parsed_data]
 
-            self.e_BB_source_list.append(e_BB_source)
-            self.e_BB_target_list.append(e_BB_target)
+        #for ind in range(self.N):
+        #    
+        #    dimer = dimers[ind]
 
-            self.e_ABsr_source_list.append(e_ABsr_source)
-            self.e_ABsr_target_list.append(e_ABsr_target)
-            self.e_ABlr_source_list.append(e_ABlr_source)
-            self.e_ABlr_target_list.append(e_ABlr_target)
+        #    RA, RB, ZA, ZB, total_charge_A, total_charge_B = self.dimer_to_data(dimer)
+
+        #    e_AA_sources = []
+        #    e_AA_targets = []
+        #    e_BB_sources = []
+        #    e_BB_targets = []
+        #    e_ABsr_sources = []
+        #    e_ABsr_targets = []
+        #    #e_ABlr_sources = []
+        #    #e_ABlr_targets = []
+
+        #    for pose_ind in range(len(RA)):
+        #        e_AA_source, e_AA_target = self.edges(RA[pose_ind])
+        #        e_BB_source, e_BB_target = self.edges(RB[pose_ind])
+        #        e_ABsr_source, e_ABsr_target, e_ABlr_source, e_ABlr_target = self.edges_im(RA[pose_ind], RB[pose_ind])
+        #        e_AA_sources.append(e_AA_source)
+        #        e_AA_targets.append(e_AA_target)
+        #        e_BB_sources.append(e_BB_source)
+        #        e_BB_targets.append(e_BB_target)
+        #        e_ABsr_sources.append(e_ABsr_source)
+        #        e_ABsr_targets.append(e_ABsr_target)
+        #        #e_ABlr_sources.append(e_ABlr_source)
+        #        #e_ABlr_targets.append(e_ABlr_target)
+
+        #    self.RA_list.append(RA)
+        #    self.RB_list.append(RB)
+        #    self.ZA_list.append(ZA)
+        #    self.ZB_list.append(ZB)
+        #    self.total_charge_A_list.append(total_charge_A)
+        #    self.total_charge_B_list.append(total_charge_B)
+
+        #    self.e_AA_source_list.append(e_AA_sources)
+        #    self.e_AA_target_list.append(e_AA_targets)
+
+        #    self.e_BB_source_list.append(e_BB_sources)
+        #    self.e_BB_target_list.append(e_BB_targets)
+
+        #    self.e_ABsr_source_list.append(e_ABsr_sources)
+        #    self.e_ABsr_target_list.append(e_ABsr_targets)
+        #    #self.e_ABlr_source_list.append(e_ABlr_sources)
+        #    #self.e_ABlr_target_list.append(e_ABlr_targets)
 
         self.IE_list = []
 
@@ -73,33 +117,63 @@ class PairDataLoader:
             self.has_energies = True
             self.IE_list = np.array(energies, dtype=np.float32)
             # todo: clean this up
-            if self.IE_list.shape[1] == 4:
+            if len(self.IE_list.shape) > 1:
+                if self.IE_list.shape[1] == 4:
+                    pass
+                elif self.IE_list.shape[1] == 5:
+                    self.IE_list = self.IE_list[:,1:]
+            else:
                 pass
-            elif self.IE_list.shape[1] == 5:
-                self.IE_list = self.IE_list[:,1:]
         else:
             self.has_energies = False
 
+    def multiprocess_loader(self, dimer):
+        RA, RB, ZA, ZB, total_charge_A, total_charge_B = self.dimer_to_data(dimer)
+    
+        e_AA_sources = []
+        e_AA_targets = []
+        e_BB_sources = []
+        e_BB_targets = []
+        e_ABsr_sources = []
+        e_ABsr_targets = []
+        #e_ABlr_sources = []
+        #e_ABlr_targets = []
+    
+        for pose_ind in range(len(RA)):
+            e_AA_source, e_AA_target = self.edges(RA[pose_ind])
+            e_BB_source, e_BB_target = self.edges(RB[pose_ind])
+            e_ABsr_source, e_ABsr_target, e_ABlr_source, e_ABlr_target = self.edges_im(RA[pose_ind], RB[pose_ind])
+            e_AA_sources.append(e_AA_source)
+            e_AA_targets.append(e_AA_target)
+            e_BB_sources.append(e_BB_source)
+            e_BB_targets.append(e_BB_target)
+            e_ABsr_sources.append(e_ABsr_source)
+            e_ABsr_targets.append(e_ABsr_target)
+            #e_ABlr_sources.append(e_ABlr_source)
+            #e_ABlr_targets.append(e_ABlr_target)
+    
+        return (RA, RB, ZA, ZB, total_charge_A, total_charge_B, e_AA_sources, e_AA_targets, e_BB_sources, e_BB_targets, e_ABsr_sources, e_ABsr_targets)
+
     def get_data(self, inds):
 
-        inp = { 'RA' : [],
-                'RB' : [],
-                'ZA' : [],
-                'ZB' : [],
-                'e_ABsr_source' : [],
-                'e_ABsr_target' : [],
-                'e_ABlr_source' : [],
-                'e_ABlr_target' : [],
-                'e_AA_source' : [],
-                'e_AA_target' : [],
-                'e_BB_source' : [],
-                'e_BB_target' : [],
-                'dimer_ind' : [],
-                'dimer_ind_lr' : [],
-                'monomerA_ind' : [],
-                'monomerB_ind' : [],
-                'total_charge_A' : [],
-                'total_charge_B' : [],
+        inp = { 'RA' : [],              # N_sys X N_poses X N_atoms_A X 3
+                'RB' : [],              # N_sys X N_poses X N_atoms_B X 3
+                'ZA' : [],              # N_sys X N_poses X N_atoms_A
+                'ZB' : [],              # N_sys X N_poses X N_atoms_B
+                'e_ABsr_source' : [],   # N_sys X N_poses X N_sr_neighborsAB 
+                'e_ABsr_target' : [],   # N_sys X N_poses X N_sr_neighborsAB   
+                #'e_ABlr_source' : [],   # N_sys X N_poses X N_lr_neighborsAB 
+                #'e_ABlr_target' : [],   # N_sys X N_poses X N_lr_neighborsAB 
+                'e_AA_source' : [],     # N_sys X N_poses X N_sr_neighborsAA 
+                'e_AA_target' : [],     # N_sys X N_poses X N_sr_neighborsAA 
+                'e_BB_source' : [],     # N_sys X N_poses X N_sr_neighborsBB 
+                'e_BB_target' : [],     # N_sys X N_poses X N_sr_neighborsBB 
+                'dimer_ind' : [],       # N_sys X N_poses X N_sr_neighborsAB
+                #'dimer_ind_lr' : [],    # N_sys X N_poses X N_lr_neighborsAB
+                'monomerA_ind' : [],    # N_sys X N_poses X N_atoms_A 
+                'monomerB_ind' : [],    # N_sys X N_poses X N_atoms_B
+                'total_charge_A' : [],  # N_sys X N_poses
+                'total_charge_B' : [],  # N_sys X N_poses
               }
 
         offsetA, offsetB = 0, 0
@@ -110,23 +184,42 @@ class PairDataLoader:
             inp['ZB'].append(self.ZB_list[ind])
             inp['total_charge_A'].append([self.total_charge_A_list[ind]])
             inp['total_charge_B'].append([self.total_charge_B_list[ind]])
-            inp['e_ABsr_source'].append(self.e_ABsr_source_list[ind] + offsetA)
-            inp['e_ABsr_target'].append(self.e_ABsr_target_list[ind] + offsetB)
-            inp['e_ABlr_source'].append(self.e_ABlr_source_list[ind] + offsetA)
-            inp['e_ABlr_target'].append(self.e_ABlr_target_list[ind] + offsetB)
-            inp['e_AA_source'].append(self.e_AA_source_list[ind] + offsetA)
-            inp['e_AA_target'].append(self.e_AA_target_list[ind] + offsetA)
-            inp['e_BB_source'].append(self.e_BB_source_list[ind] + offsetB)
-            inp['e_BB_target'].append(self.e_BB_target_list[ind] + offsetB)
-            inp['dimer_ind'].append(np.full(len(self.e_ABsr_source_list[ind]), i))
-            inp['dimer_ind_lr'].append(np.full(len(self.e_ABlr_source_list[ind]), i))
-            inp['monomerA_ind'].append(np.full(len(self.RA_list[ind]), i))
-            inp['monomerB_ind'].append(np.full(len(self.RB_list[ind]), i))
-            offsetA += self.RA_list[ind].shape[0]
-            offsetB += self.RB_list[ind].shape[0]
+            inp['e_ABsr_source'].append([sources + offsetA for sources in self.e_ABsr_source_list[ind]])
+            inp['e_ABsr_target'].append([targets + offsetB for targets in self.e_ABsr_target_list[ind]])
+            #inp['e_ABlr_source'].append([sources + offsetA for sources in self.e_ABlr_source_list[ind]])
+            #inp['e_ABlr_target'].append([targets + offsetB for targets in self.e_ABlr_target_list[ind]])
+            inp['e_AA_source'].append([sources + offsetA for sources in self.e_AA_source_list[ind]])
+            inp['e_AA_target'].append([targets + offsetA for targets in self.e_AA_target_list[ind]])
+            inp['e_BB_source'].append([sources + offsetA for sources in self.e_BB_source_list[ind]])
+            inp['e_BB_target'].append([targets + offsetA for targets in self.e_BB_target_list[ind]])
+            inp['dimer_ind'].append([np.full(len(src_len), i*len(self.e_ABsr_source_list[ind])+j) for j, src_len in enumerate(self.e_ABsr_source_list[ind])])
+            #inp['dimer_ind_lr'].append([np.full(len(src_len), i*len(self.e_ABsr_source_list[ind])+j) for j, src_len in enumerate(self.e_ABlr_source_list[ind])])
+            inp['monomerA_ind'].append([np.full(len(R_len), i*len(self.RA_list[ind])+j) for j, R_len in enumerate(self.RA_list[ind])])
+            inp['monomerB_ind'].append([np.full(len(R_len), i*len(self.RB_list[ind])+j) for j, R_len in enumerate(self.RB_list[ind])])
+            offsetA += self.RA_list[ind][0].shape[0] # [ind][0] hardcode implies all RA and RB in a multipose
+            offsetB += self.RB_list[ind][0].shape[0] #   have the same number of atoms
 
-        for k, v in inp.items():
-            inp[k] = np.concatenate(v, axis=0)
+        #print(np.array(self.RA_list[0]).shape)
+        #print(np.array(self.RB_list[0]).shape)
+        #print(np.array(inp['RA'][0]).shape)
+        #print(np.array(inp['RB'][0]).shape)
+        #print(np.array(inp['dimer_ind']))
+        #print(np.array(inp['dimer_ind']).shape)
+        #print(np.array(inp['dimer_ind'][0]).shape)
+        #exit()
+
+        ### For now, opting to do the following to retain flexibility in handling disparate numbers
+        ### of poses between examples.
+        if not self.multipose:
+            for k, v in inp.items():
+                inp[k] = [np.concatenate(v[sys], axis=0) for sys in range(len(v))]
+        else:
+            #print(len(inp['RA']))
+            for k, v in inp.items():
+                inp[k] = np.concatenate(v[0], axis=0)
+                #inp[k] = np.squeeze(np.concatenate(v[0], axis=0))
+            #print(len(inp['RA']))
+        ###
 
         if not self.has_energies:
             return inp
@@ -198,37 +291,63 @@ class PairDataLoader:
     def dimer_to_data(self, dimer):
         """ QCelemental molecule to ML-ready numpy arrays """
 
-        # this better be a dimer (not a monomer, trimer, etc.)
-        if  len(dimer.fragments) != 2:
-            #raise AssertionError(f"A dimer must have exactly 2 molecular fragments, found {len(dimer.fragments)}")
-            return None
+        if type(dimer) is list:
+            multipose = True
+            RAs = []
+            RBs = []
+            ZAs = []
+            ZBs = []
+            total_charges_A = []
+            total_charges_B = []
+            for dim in dimer:
+                if len(dim.fragments) != 2:
+                    raise AssertionError(f"A dimer must have exactly 2 molecular fragments, found {len(dim.fragments)}")
+                    return None
+                RAs.append(np.array(dim.geometry[dim.fragments[0]], dtype=np.float32) * constants.au2ang)
+                RBs.append(np.array(dim.geometry[dim.fragments[1]], dtype=np.float32) * constants.au2ang)
+                ZAs.append(np.array([constants.elem_to_z[za] for za in dim.symbols[dim.fragments[0]]], dtype=np.float32))
+                ZBs.append(np.array([constants.elem_to_z[zb] for zb in dim.symbols[dim.fragments[1]]], dtype=np.float32))
+                total_charges_A.append(int(dim.fragment_charges[0]))
+                total_charges_B.append(int(dim.fragment_charges[1]))
+            return (RAs, RBs, ZAs, ZBs, total_charges_A, total_charges_B)
 
-        RA = np.array(dimer.geometry[dimer.fragments[0]], dtype=np.float32) * constants.au2ang
-        RB = np.array(dimer.geometry[dimer.fragments[1]], dtype=np.float32) * constants.au2ang
+        else:
+            # this better be a dimer (not a monomer, trimer, etc.)
+            if  len(dimer.fragments) != 2:
+                raise AssertionError(f"A dimer must have exactly 2 molecular fragments, found {len(dimer.fragments)}")
+                return None
 
-        # only some elements allowed; todo: better error message
-        try:
-            # todo: int
-            ZA = np.array([constants.elem_to_z[za] for za in dimer.symbols[dimer.fragments[0]]], dtype=np.float32)
-            ZB = np.array([constants.elem_to_z[zb] for zb in dimer.symbols[dimer.fragments[1]]], dtype=np.float32)
-        except:
-            return None
+            RA = np.array(dimer.geometry[dimer.fragments[0]], dtype=np.float32) * constants.au2ang
+            RB = np.array(dimer.geometry[dimer.fragments[1]], dtype=np.float32) * constants.au2ang
 
-        total_charge_A = int(dimer.fragment_charges[0])
-        total_charge_B = int(dimer.fragment_charges[1])
+            # only some elements allowed; todo: better error message
+            try:
+                # todo: int
+                ZA = np.array([constants.elem_to_z[za] for za in dimer.symbols[dimer.fragments[0]]], dtype=np.float32)
+                ZB = np.array([constants.elem_to_z[zb] for zb in dimer.symbols[dimer.fragments[1]]], dtype=np.float32)
+            except:
+                return None
 
-        return (RA, RB, ZA, ZB, total_charge_A, total_charge_B)
-
+            total_charge_A = int(dimer.fragment_charges[0])
+            total_charge_B = int(dimer.fragment_charges[1])
+            return ([RA], [RB], [ZA], [ZB], [total_charge_A], [total_charge_B])
+        
 
 class PairModel:
     """ todo """
 
-    def __init__(self, atom_model, **kwargs):
+    def __init__(self, atom_model=None, multipose=False, **kwargs):
 
         # todo : pass params
         # todo : better atom_model handling
+        self.atom_model = atom_model
         if atom_model is not None:
             self.model = KerasPairModel(atom_model.model)
+        else:
+            self.model = KerasPairModel()
+        self.multipose = multipose
+        if multipose:
+            self.batch_size = 1
 
     @classmethod
     def from_file(cls, model_path):
@@ -284,8 +403,10 @@ class PairModel:
         # training hyperparameters
         n_epochs = kwargs.get("n_epochs", 15)
         batch_size = kwargs.get("batch_size", 16)
-        learning_rate = kwargs.get("learning_rate", 0.0005)
+        learning_rate = kwargs.get("learning_rate", 0.0010)
         learning_rate_decay = 0.0 #TODO
+        if self.multipose:
+            batch_size = self.batch_size
 
         print("\nTraining Hyperparameters:", flush=True)
         print(f"  {n_epochs=}", flush=True)
@@ -308,36 +429,51 @@ class PairModel:
         num_batches = math.ceil(Nt / batch_size)
 
         # TODO: replaced hardcoded 200 dimers. Probably want a data_loader.get_large_batch
-        inds_t_chunks = [inds_t[i*200:min((i+1)*200,Nt)] for i in range(math.ceil(Nt / 200))]
-        inds_v_chunks = [inds_v[i*200:min((i+1)*200,Nv)] for i in range(math.ceil(Nv / 200))]
+        #inds_t_chunks = [inds_t[i*200:min((i+1)*200,Nt)] for i in range(math.ceil(Nt / 200))]
+        #inds_v_chunks = [inds_v[i*200:min((i+1)*200,Nv)] for i in range(math.ceil(Nv / 200))]
 
         print("\nProcessing Dataset...", flush=True)
         time_loaddata_start = time.time()
-        data_loader_t = PairDataLoader(dimers_t, energies_t, 5.0, r_cut_im)
-        data_loader_v = PairDataLoader(dimers_v, energies_v, 5.0, r_cut_im)
+        data_loader_t = PairDataLoader(dimers_t, energies_t, 5.0, r_cut_im, self.multipose)
+        data_loader_v = PairDataLoader(dimers_v, energies_v, 5.0, r_cut_im, self.multipose)
         dt_loaddata = time.time() - time_loaddata_start
         print(f"...Done in {dt_loaddata:.2f} seconds", flush=True)
 
-        inp_t, energy_t = data_loader_t.get_data(inds_t)
-        inp_v, energy_v = data_loader_v.get_data(inds_v)
+        #inp_t, energy_t = data_loader_t.get_data(inds_t)
+        #inp_v, energy_v = data_loader_v.get_data(inds_v)
 
-        inp_t_chunks = [data_loader_t.get_data(inds_t_i) for inds_t_i in inds_t_chunks]
-        inp_v_chunks = [data_loader_v.get_data(inds_v_i) for inds_v_i in inds_v_chunks]
+        #inp_t_chunks = [data_loader_t.get_data(inds_t_i) for inds_t_i in inds_t_chunks]
+        #inp_v_chunks = [data_loader_v.get_data(inds_v_i) for inds_v_i in inds_v_chunks]
+        preds_t = []
+        preds_v = []
+        energy_t = []
+        energy_v = []
+        for inds in inds_t:
+            inp_t_chunk = data_loader_t.get_data([inds])
+            preds_t.append(np.sum(test_batch(self.model, inp_t_chunk[0])))
+            energy_t.append(inp_t_chunk[1][0])
+        for inds in inds_v:
+            inp_v_chunk = data_loader_v.get_data([inds])
+            preds_v.append(np.sum(test_batch(self.model, inp_v_chunk[0])))
+            energy_v.append(inp_v_chunk[1][0])
 
-        preds_t = np.concatenate([test_batch(self.model, inp_t_i[0]) for inp_t_i in inp_t_chunks], axis=0)
-        preds_v = np.concatenate([test_batch(self.model, inp_v_i[0]) for inp_v_i in inp_v_chunks], axis=0)
+        #preds_t = np.concatenate([test_batch(self.model, inp_t_i[0]) for inp_t_i in inp_t_chunks], axis=0)
+        #preds_v = np.concatenate([test_batch(self.model, inp_v_i[0]) for inp_v_i in inp_v_chunks], axis=0)
+        #print(type(inp_t_chunks))
+        #print(len(inp_t_chunks))
+        #print(len(inp_t_chunks[0][0]['RA']))
+        #exit()
+        #print(inp_t_chunks[0][1])
+        
+        #pred_t = np.sum(preds_t)
+        #pred_v = np.sum(preds_v)
 
-        mae_t = np.average(np.abs(np.array(preds_t) - energy_t), axis=0)
-        mae_v = np.average(np.abs(np.array(preds_v) - energy_v), axis=0)
-
-        total_mae_t = np.average(np.abs(np.sum(np.array(preds_t) - energy_t, axis=1)))
-        total_mae_v = np.average(np.abs(np.sum(np.array(preds_v) - energy_v, axis=1)))
-
+        mae_t = np.average(np.abs(np.array(preds_t) - np.array(energy_t)), axis=0)
+        mae_v = np.average(np.abs(np.array(preds_v) - np.array(energy_v)), axis=0)
+        
         loss_v_best = mae_v
-        total_loss_v_best = total_mae_v
 
-        print("                                       Total            Elst            Exch            Ind            Disp", flush=True)
-        print(f"  (Pre-training)             MAE: {total_mae_t:>7.3f}/{total_mae_v:<7.3f} {mae_t[0]:>7.3f}/{mae_v[0]:<7.3f} {mae_t[1]:>7.3f}/{mae_v[1]:<7.3f} {mae_t[2]:>7.3f}/{mae_v[2]:<7.3f} {mae_t[3]:>7.3f}/{mae_v[3]:<7.3f}", flush=True)
+        print(f"  (Pre-training)             MAE: {mae_t:>7.3f}/{mae_v:<7.3f}", flush=True)
 
         if model_path is not None:
             self.model.save(model_path)
@@ -364,39 +500,47 @@ class PairModel:
                 inp_batch, ie_batch = data_loader_t.get_data(inds_batch)
 
                 preds_batch = train_batch(self.model, optimizer, loss_fn, inp_batch, ie_batch)
-                preds_batch = tf.reshape(preds_batch, [-1, 4])
+                #preds_batch = tf.reshape(preds_batch, [-1, 4])
 
                 preds_t.append(preds_batch)
+                #print(preds_batch)
+                #print(ie_batch)
                 err_t.append(preds_batch - ie_batch)
 
 
-            preds_t = np.concatenate(preds_t)
-            err_t = np.concatenate(err_t)
-            mae_t = np.average(np.abs(err_t), axis=0)
-            total_mae_t = np.average(np.abs(np.sum(err_t, axis=1)))
+            #preds_t = np.concatenate(preds_t)
+            #err_t = np.concatenate(err_t)
+            mae_t = np.average(np.average(np.abs(err_t), axis=0))
+            #total_mae_t = np.average(np.abs(np.sum(err_t, axis=1)))
 
-            preds_v = np.concatenate([test_batch(self.model, inp_v_i[0]) for inp_v_i in inp_v_chunks])
-            mae_v = np.average(np.abs(np.array(preds_v) - energy_v), axis=0)
-            total_mae_v = np.average(np.abs(np.sum(np.array(preds_v) - energy_v, axis=1)))
+            preds_v = []
+            for inds in inds_v:
+                inp_v_chunk = data_loader_v.get_data([inds])
+                preds_v.append(np.sum(test_batch(self.model, inp_v_chunk[0])))
+            #preds_v = np.array([np.sum(test_batch(self.model, inp_v_i[0])) for inp_v_i in inp_v_chunks])
+            mae_v = np.average(np.average(np.abs(np.array(preds_v) - energy_v), axis=0))
+            #total_mae_v = np.average(np.abs(np.sum(np.array(preds_v) - energy_v, axis=1)))
 
             loss_v = mae_v
-            total_loss_v = total_mae_v
+            #total_loss_v = total_mae_v
 
             np.random.shuffle(inds_t)
 
             dt = time.time() - t1
 
             #if np.sum(loss_v) < np.sum(loss_v_best):
-            if total_loss_v < total_loss_v_best:
+            if loss_v < loss_v_best:
                 if model_path is not None:
                     self.model.save(model_path)
                 loss_v_best = loss_v
-                total_loss_v_best = total_loss_v
+                #total_loss_v_best = total_loss_v
                 improved = "*"
             else:
                 improved = ""
 
-            print(f'EPOCH: {ep:4d} ({dt:<6.1f} sec)     MAE: {total_mae_t:>7.3f}/{total_mae_v:<7.3f} {mae_t[0]:>7.3f}/{mae_v[0]:<7.3f} {mae_t[1]:>7.3f}/{mae_v[1]:<7.3f} {mae_t[2]:>7.3f}/{mae_v[2]:<7.3f} {mae_t[3]:>7.3f}/{mae_v[3]:<7.3f}  {improved}', flush=True)
+            #print(mae_t)
+            #print(mae_v)
+            print(f'EPOCH: {ep:4d} ({dt:<6.1f} sec)     MAE: {mae_t:>7.3f}/{mae_v:<7.3f} {improved}', flush=True)
 
         if log_path is not None:
             sys.stdout = default_stdout
@@ -413,7 +557,7 @@ class PairModel:
 
         print("Processing Dataset...", flush=True)
         time_loaddata_start = time.time()
-        data_loader = PairDataLoader(dimers, None, 5.0, self.model.get_config()["r_cut_im"])
+        data_loader = PairDataLoader(dimers, None, 5.0, self.model.get_config()["r_cut_im"], self.multipose)
         dt_loaddata = time.time() - time_loaddata_start
         print(f"...Done in {dt_loaddata:.2f} seconds", flush=True)
 
@@ -429,6 +573,15 @@ class PairModel:
     # Possible TODO: predict_elst, transfer_learning, gradient
 
 
+
+
+def softmax(values):
+    values = np.log(1 + np.exp(values))
+    value_weights = np.exp(values) / np.sum(np.exp(values))
+    values *= value_weights
+    return values
+
+
 @tf.function(experimental_relax_shapes=True)
 def train_batch(model, optimizer, loss_fn, inp, ie):
 
@@ -437,11 +590,9 @@ def train_batch(model, optimizer, loss_fn, inp, ie):
     with tf.GradientTape() as tape:
 
         preds = model(inp, training=True)
-        preds = tf.reshape(preds, [-1, 4])
+        preds = tf.reduce_sum(preds)
 
-        preds_flat = tf.reshape(preds, [-1])
-        ie_flat = tf.reshape(ie, [-1])
-        loss_value = loss_fn(ie_flat, preds_flat)
+        loss_value = loss_fn(ie, preds)
 
     grads = tape.gradient(loss_value, model.trainable_weights)
     optimizer.apply_gradients(zip(grads, model.trainable_weights))
@@ -451,13 +602,13 @@ def train_batch(model, optimizer, loss_fn, inp, ie):
 def test_batch(model, inp):
 
     preds  = model(inp, training=False)
-    preds = tf.reshape(preds, [-1, 4])
+    #preds = tf.reshape(preds, [-1, 4])
 
     return preds
 
 
 
 if __name__ == "__main__":
-    
-    model = KerasPairModel()
-    model2 = PairModel()
+    pass 
+    #model = KerasPairModel()
+    #model2 = PairModel()

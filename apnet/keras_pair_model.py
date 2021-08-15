@@ -10,11 +10,11 @@ import tensorflow as tf
 import logging
 tf.get_logger().setLevel(logging.ERROR)
 
-from apnet.layers import DistanceLayer, FeedForwardLayer
+from apnet.layers import DistanceLayer, FeedForwardLayer, EdgeAttention
 
 #################
 
-max_Z = 35 # largest atomic number
+max_Z = 100 # largest atomic number
 
 #################
 
@@ -55,12 +55,13 @@ def get_pair(hA, hB, rbf, e_source, e_target):
 
 class KerasPairModel(tf.keras.Model):
 
-    def __init__(self, atom_model, n_message=3, n_rbf=8, n_neuron=128, n_embed=8, r_cut_im=8.0):
+    def __init__(self, atom_model=None, n_message=3, n_rbf=8, n_neuron=128, n_embed=8, r_cut_im=8.0, scale_init=-1.e-5, shift_init=6.27):
         super(KerasPairModel, self).__init__()
 
         # pre-trained atomic model for predicting atomic properties
         self.atom_model = atom_model
-        self.atom_model.trainable = False
+        if self.atom_model is not None:
+            self.atom_model.trainable = False
 
         # network hyperparameters
         self.n_message = n_message
@@ -76,6 +77,9 @@ class KerasPairModel(tf.keras.Model):
         # embed atom types
         self.embed_layer = tf.keras.layers.Embedding(max_Z+1, n_embed)
 
+        self.scale = tf.Variable(scale_init)
+        self.shift = tf.Variable(shift_init)
+
         ## pre-trained atomic model for predicting atomic properties
         #self.atom_model = keras.models.load_model("/storage/home/hhive1/zglick3/data/test_apnet/atom_models/atom0/")
         #self.atom_model.trainable = False
@@ -85,10 +89,11 @@ class KerasPairModel(tf.keras.Model):
         layer_nodes_readout = [n_neuron * 2, n_neuron, n_neuron // 2, 1]
         layer_activations = ["relu", "relu", "relu", "linear"]
 
-        self.readout_layer_elst = FeedForwardLayer(layer_nodes_readout, layer_activations, f'readout_layer_elst')
-        self.readout_layer_exch = FeedForwardLayer(layer_nodes_readout, layer_activations, f'readout_layer_exch')
-        self.readout_layer_ind = FeedForwardLayer(layer_nodes_readout, layer_activations, f'readout_layer_ind')
-        self.readout_layer_disp = FeedForwardLayer(layer_nodes_readout, layer_activations, f'readout_layer_disp')
+        self.readout_layer = FeedForwardLayer(layer_nodes_readout, layer_activations, f'readout_layer')
+
+        # if desired, do a simple edge attention layer over the edges
+        self.edge_dim = 2* (n_embed * 5) + n_rbf
+        self.edge_attention = EdgeAttention(3, self.edge_dim, 'edge_attention') 
 
         # embed distances into large orthogonal basis
         self.distance_layer = DistanceLayer(n_rbf, 5.0)
@@ -166,9 +171,9 @@ class KerasPairModel(tf.keras.Model):
         dimer_ind = inputs['dimer_ind']
 
         # long range, intermolecular edges
-        e_ABlr_source = inputs['e_ABlr_source']
-        e_ABlr_target = inputs['e_ABlr_target']
-        dimer_ind_lr = inputs['dimer_ind_lr']
+        #e_ABlr_source = inputs['e_ABlr_source']
+        #e_ABlr_target = inputs['e_ABlr_target']
+        #dimer_ind_lr = inputs['dimer_ind_lr']
 
         # intramonomer edges (monomer A)
         e_AA_source = inputs['e_AA_source']
@@ -183,11 +188,11 @@ class KerasPairModel(tf.keras.Model):
         natomB = tf.shape(ZB)[0]
         ndimer = tf.shape(inputs['total_charge_A'])[0]
         nedge_sr = tf.shape(e_ABsr_source)[0]
-        nedge_lr = tf.shape(e_ABlr_source)[0]
+        #nedge_lr = tf.shape(e_ABlr_source)[0]
 
         # interatomic distances
         dR_sr, dR_sr_xyz = get_distances(RA, RB, e_ABsr_source, e_ABsr_target)
-        dR_lr, dR_lr_xyz = get_distances(RA, RB, e_ABlr_source, e_ABlr_target)
+        #dR_lr, dR_lr_xyz = get_distances(RA, RB, e_ABlr_source, e_ABlr_target)
         dRA, dRA_xyz  = get_distances(RA, RA, e_AA_source, e_AA_target)
         dRB, dRB_xyz  = get_distances(RB, RB, e_BB_source, e_BB_target)
 
@@ -226,6 +231,17 @@ class KerasPairModel(tf.keras.Model):
 
         qA, muA, quadA, hlistA = self.atom_model(inputsA)
         qB, muB, quadB, hlistB = self.atom_model(inputsB)
+        atom_hA = tf.concat(hlistA, axis=-1)
+        atom_hB = tf.concat(hlistB, axis=-1)
+        #print(inputsA['R'].shape)
+        #print(inputsA['Z'].shape)
+        #print(inputsA['e_source'].shape)
+        #print(inputsA['molecule_ind'].shape)
+        #print(qA.shape)
+        #print(qB.shape)
+        #exit()
+
+        #print(f'atom model hidden state shape: {hlistA[0].shape}')
 
         ################################################################
         ### predict SAPT components via intramonomer message passing ###
@@ -235,58 +251,60 @@ class KerasPairModel(tf.keras.Model):
         # each list element is [natomA/B x nembed]
         hA_list = [tf.keras.layers.Flatten()(self.embed_layer(ZA))]
         hB_list = [tf.keras.layers.Flatten()(self.embed_layer(ZB))]
+        hA_list.append(atom_hA)
+        hB_list.append(atom_hB)
 
-        # directional hidden state lists
-        # each list element is [natomA/B x 3 x nembed]
-        hA_dir_list = []
-        hB_dir_list = []
+        ## directional hidden state lists
+        ## each list element is [natomA/B x 3 x nembed]
+        #hA_dir_list = []
+        #hB_dir_list = []
 
-        for i in range(self.n_message):
+        #for i in range(self.n_message):
 
-            # intramonomer messages (from atom a to a' and from b to b')
-            # [intrmonomer_edges x message_size]
-            mA_ij = get_messages(hA_list[0], hA_list[-1], rbfA, e_AA_source, e_AA_target)
-            mB_ij = get_messages(hB_list[0], hB_list[-1], rbfB, e_BB_source, e_BB_target)
+        #    # intramonomer messages (from atom a to a' and from b to b')
+        #    # [intrmonomer_edges x message_size]
+        #    mA_ij = get_messages(hA_list[0], hA_list[-1], rbfA, e_AA_source, e_AA_target)
+        #    mB_ij = get_messages(hB_list[0], hB_list[-1], rbfB, e_BB_source, e_BB_target)
 
-            #################
-            ### invariant ###
-            #################
+        #    #################
+        #    ### invariant ###
+        #    #################
 
-            # sum each atom's messages
-            # [atoms x message_size]
-            mA_i = tf.math.unsorted_segment_sum(mA_ij, e_AA_source, natomA)
-            mB_i = tf.math.unsorted_segment_sum(mB_ij, e_BB_source, natomB)
+        #    # sum each atom's messages
+        #    # [atoms x message_size]
+        #    mA_i = tf.math.unsorted_segment_sum(mA_ij, e_AA_source, natomA)
+        #    mB_i = tf.math.unsorted_segment_sum(mB_ij, e_BB_source, natomB)
 
-            # get the next hidden state of the atom
-            # [atomx x hidden_dim]
-            hA_next = self.update_layers[i](mA_i)
-            hB_next = self.update_layers[i](mB_i)
+        #    # get the next hidden state of the atom
+        #    # [atomx x hidden_dim]
+        #    hA_next = self.update_layers[i](mA_i)
+        #    hB_next = self.update_layers[i](mB_i)
 
-            hA_list.append(hA_next)
-            hB_list.append(hB_next)
+        #    hA_list.append(hA_next)
+        #    hB_list.append(hB_next)
 
-            ###################
-            ### directional ###
-            ###################
+        #    ###################
+        #    ### directional ###
+        #    ###################
 
-            # intromonomer directional messages are regular intramonomer messages, fed through a dense net
-            mA_ij_dir = self.directional_layers[i](mA_ij) # [e x 8]
-            mB_ij_dir = self.directional_layers[i](mB_ij) # [e x 8]
+        #    # intromonomer directional messages are regular intramonomer messages, fed through a dense net
+        #    mA_ij_dir = self.directional_layers[i](mA_ij) # [e x 8]
+        #    mB_ij_dir = self.directional_layers[i](mB_ij) # [e x 8]
 
-            # contract with intramonomer unit vectors to make directional
-            mA_ij_dir = tf.einsum('ex,em->exm', dRA_unit, mA_ij_dir) # [e x 3 x 8]
-            mB_ij_dir = tf.einsum('ex,em->exm', dRB_unit, mB_ij_dir) # [e x 3 x 8]
+        #    # contract with intramonomer unit vectors to make directional
+        #    mA_ij_dir = tf.einsum('ex,em->exm', dRA_unit, mA_ij_dir) # [e x 3 x 8]
+        #    mB_ij_dir = tf.einsum('ex,em->exm', dRB_unit, mB_ij_dir) # [e x 3 x 8]
 
-            # sum directional messages to get directional atomic hidden states
-            # NOTE: this summation must be linear to guarantee equivariance.
-            #       because of this constraint, we applied a dense net before the summation, not after
-            hA_dir = tf.math.unsorted_segment_sum(mA_ij_dir, e_AA_source, natomA) # [a x 3 x 8]
-            hB_dir = tf.math.unsorted_segment_sum(mB_ij_dir, e_BB_source, natomB) # [a x 3 x 8]
+        #    # sum directional messages to get directional atomic hidden states
+        #    # NOTE: this summation must be linear to guarantee equivariance.
+        #    #       because of this constraint, we applied a dense net before the summation, not after
+        #    hA_dir = tf.math.unsorted_segment_sum(mA_ij_dir, e_AA_source, natomA) # [a x 3 x 8]
+        #    hB_dir = tf.math.unsorted_segment_sum(mB_ij_dir, e_BB_source, natomB) # [a x 3 x 8]
 
-            hA_dir_list.append(hA_dir)
-            hB_dir_list.append(hB_dir)
+        #    hA_dir_list.append(hA_dir)
+        #    hB_dir_list.append(hB_dir)
 
-        # concatenate hidden states over MP iterations
+        ## concatenate hidden states over MP iterations
         hA = tf.keras.layers.Flatten()(tf.concat(hA_list, axis=-1))
         hB = tf.keras.layers.Flatten()(tf.concat(hB_list, axis=-1))
 
@@ -295,69 +313,99 @@ class KerasPairModel(tf.keras.Model):
         hBA = get_pair(hB, hA, rbf_sr, e_ABsr_target, e_ABsr_source)
 
 
-        # project the directional atomic hidden states along the interatomic axis
-        # (this is invariant to rotation)
-        hA_dir = tf.concat(hA_dir_list, axis=-1)
-        hB_dir = tf.concat(hB_dir_list, axis=-1)
+        ## project the directional atomic hidden states along the interatomic axis
+        ## (this is invariant to rotation)
+        #hA_dir = tf.concat(hA_dir_list, axis=-1)
+        #hB_dir = tf.concat(hB_dir_list, axis=-1)
 
-        hA_dir_source = tf.gather(hA_dir, e_ABsr_source)
-        hB_dir_target = tf.gather(hB_dir, e_ABsr_target)
+        #hA_dir_source = tf.gather(hA_dir, e_ABsr_source)
+        #hB_dir_target = tf.gather(hB_dir, e_ABsr_target)
 
-        hA_dir_blah = tf.einsum('axf,ax->af', hA_dir_source, dR_sr_unit)
-        hB_dir_blah = tf.einsum('axf,ax->af', hB_dir_target, -1.0 * dR_sr_unit)
+        #hA_dir_blah = tf.einsum('axf,ax->af', hA_dir_source, dR_sr_unit)
+        #hB_dir_blah = tf.einsum('axf,ax->af', hB_dir_target, -1.0 * dR_sr_unit)
 
-        # concat projected directional hidden states to atom pair features
-        hAB = tf.concat([hAB, hA_dir_blah, hB_dir_blah], axis=1)
-        hBA = tf.concat([hBA, hB_dir_blah, hA_dir_blah], axis=1)
 
-        # run atom-pair features through a dense net to predict SAPT components
-        EAB_sr = tf.concat([self.readout_layer_elst(hAB), self.readout_layer_exch(hAB), self.readout_layer_ind(hAB), self.readout_layer_disp(hAB)], axis=1)
-        EBA_sr = tf.concat([self.readout_layer_elst(hBA), self.readout_layer_exch(hBA), self.readout_layer_ind(hBA), self.readout_layer_disp(hBA)], axis=1)
-
-        # symmetrize atom-pair predictions wrt monomers (E(a,b) = E(b,a)
-        E_sr = EAB_sr + EBA_sr
-
-        # scale atom-pair predictions by inverse distance
-        cutoff = tf.math.reciprocal(dR_sr) ** 3
-        E_sr = tf.einsum('xy,x->xy', E_sr, cutoff)
-
-        # sum atom-pair predictions to get dimer predictions
-        E_sr = tf.math.segment_sum(E_sr, dimer_ind)
-
-        # padding necessary in case some dimers had zero short-range atom pairs
-        dimer_padder_sr = tf.convert_to_tensor([[0,ndimer-tf.shape(E_sr)[0]], [0,0]])
-        E_sr = tf.pad(E_sr, dimer_padder_sr)
 
         ####################################################
         ### predict multipole electrostatic interactions ###
         ####################################################
 
         # electrostatics between close atoms (we have to combine with NN IE)
-        E_elst_sr = self.mtp_elst(qA, muA, quadA, qB, muB, quadB, e_ABsr_source, e_ABsr_target, dR_sr, dR_sr_xyz)
-        E_elst_sr = tf.math.segment_sum(E_elst_sr, dimer_ind)
-        E_elst_sr = tf.reshape(E_elst_sr, [-1, 1])
-        E_elst_sr = tf.pad(E_elst_sr, dimer_padder_sr)
+        #E_elst_sr = self.mtp_elst(qA, muA, quadA, qB, muB, quadB, e_ABsr_source, e_ABsr_target, dR_sr, dR_sr_xyz)
+        #E_elst_sr = tf.math.segment_sum(E_elst_sr, dimer_ind)
+        #E_elst_sr = tf.reshape(E_elst_sr, [-1, 1])
+        #E_elst_sr = tf.pad(E_elst_sr, dimer_padder_sr)
 
         # electrostatics between distance atoms (these atoms have zero NN IE)
-        E_elst_lr = self.mtp_elst(qA, muA, quadA, qB, muB, quadB, e_ABlr_source, e_ABlr_target, dR_lr, dR_lr_xyz)
-        E_elst_lr = tf.math.segment_sum(E_elst_lr, dimer_ind_lr)
-        E_elst_lr = tf.reshape(E_elst_lr, [-1, 1])
-        dimer_padder_lr = tf.convert_to_tensor([[0,ndimer-tf.shape(E_elst_lr)[0]], [0,0]])
-        E_elst_lr = tf.pad(E_elst_lr, dimer_padder_lr)
+        #E_elst_lr = self.mtp_elst(qA, muA, quadA, qB, muB, quadB, e_ABlr_source, e_ABlr_target, dR_lr, dR_lr_xyz)
+        #E_elst_lr = tf.math.segment_sum(E_elst_lr, dimer_ind_lr)
+        #E_elst_lr = tf.reshape(E_elst_lr, [-1, 1])
+        #dimer_padder_lr = tf.convert_to_tensor([[0,ndimer-tf.shape(E_elst_lr)[0]], [0,0]])
+        #E_elst_lr = tf.pad(E_elst_lr, dimer_padder_lr)
 
-        E_elst = tf.pad(E_elst_sr + E_elst_lr, tf.constant([[0,0], [0,3]]))
+        #E_elst = tf.pad(E_elst_sr + E_elst_lr, tf.constant([[0,0], [0,3]]))
+        #E_elst = tf.pad(E_elst_sr, tf.constant([[0,0], [0,3]]))
+
+        # concat projected directional hidden states and charges, mtp elst energies to atom pair features
+        #hAB = tf.concat([hAB, hA_dir_blah, hB_dir_blah], axis=1)
+        #hBA = tf.concat([hBA, hB_dir_blah, hA_dir_blah], axis=1)
 
         #########################
         ### interation energy ###
         #########################
+        #print('Readout input shapes:')
+        #print(f'qA       : {qA.shape}')
+        #print(f'qB       : {qB.shape}')
+        #print(f'E_elst   : {E_elst.shape}')
+        #print(f'hAB (ref): {hAB.shape}')
+        #print(f'hBA (ref): {hBA.shape}')
+        
+        # run atom-pair features through a dense net to predict SAPT components
+        #EAB_sr = tf.concat([self.readout_layer_elst(hAB), self.readout_layer_exch(hAB), self.readout_layer_ind(hAB), self.readout_layer_disp(hAB)], axis=1)
+        #EBA_sr = tf.concat([self.readout_layer_elst(hBA), self.readout_layer_exch(hBA), self.readout_layer_ind(hBA), self.readout_layer_disp(hBA)], axis=1)
 
-        return E_sr + E_elst
+        # run atom-pair features through a dense net to predict dG contributions
+        # here, we're doing edge attention to get a system-wide feature vector that is read-out.
+        # since we have a canonical protein-ligand choice for A and B, we can do a single pass
+        sys_feats = self.edge_attention(hAB)
+
+        #EAB_sr = self.readout_layer(hAB)
+        #EBA_sr = self.readout_layer(hBA)
+
+        # symmetrize atom-pair predictions wrt monomers (E(a,b) = E(b,a)
+        #E_sr = (EAB_sr + EBA_sr) * self.scale
+
+        # scale atom-pair predictions by inverse distance
+        #cutoff = tf.math.reciprocal(dR_sr) ** 3
+        #E_sr = tf.einsum('xy,x->xy', E_sr, cutoff)
+        #tf.print(len(E_sr))
+
+        # sum atom-pair feats to get dimer predictions
+        #print(sys_feats.shape)
+        #E_sr = tf.math.segment_sum(E_sr, dimer_ind)
+        E_sr = tf.math.segment_sum(sys_feats, dimer_ind)
+        E_sr = self.readout_layer(sys_feats)
+        #print(E_sr.shape)
+        #exit()
+        
+        #E_sr = tf.math.softplus(E_sr)
+        E_sr = E_sr + self.shift
+        E_sr = E_sr * tf.nn.softmax(E_sr, axis=0)
+        
+        #tf.print(E_sr)
+
+        # padding necessary in case some dimers had zero short-range atom pairs
+        #dimer_padder_sr = tf.convert_to_tensor([[0,ndimer-tf.shape(E_sr)[0]], [0,0]])
+        #E_sr = tf.pad(E_sr, dimer_padder_sr)
+        #tf.print(E_sr)
+
+        return E_sr #+ E_elst
 
 
     def get_config(self):
 
         return {
-            "atom_model" : self.atom_model,
+            #"atom_model" : self.atom_model,
             "n_message" : self.n_message,
             "n_rbf" : self.n_rbf,
             "n_neuron" : self.n_neuron,
@@ -367,7 +415,7 @@ class KerasPairModel(tf.keras.Model):
 
     @classmethod
     def from_config(cls, config):
-        return cls(atom_model=config["atom_model"],
+        return cls(#atom_model=config["atom_model"],
                    n_message=config["n_message"],
                    n_rbf=config["n_rbf"],
                    n_neuron=config["n_neuron"],

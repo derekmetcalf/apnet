@@ -3,6 +3,7 @@ General utility functions for pre-processing molecules
 """
 
 import os
+import multiprocessing
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 import numpy as np
@@ -15,6 +16,7 @@ import logging
 tf.get_logger().setLevel(logging.ERROR)
 
 from apnet import constants
+from multiprocessing import Pool
 
 def qcel_to_dimerdata(dimer):
     """ proper qcel mol to ML-ready numpy arrays """
@@ -61,7 +63,7 @@ def qcel_to_monomerdata(monomer):
 
     return (R, Z, aQ)
 
-def dimerdata_to_qcel(RA, RB, ZA, ZB, aQA, aQB):
+def dimerdata_to_qcel(RA, RB, ZA, ZB, aQA, aQB, ignore_ch_mult=False):
     """ ML-ready numpy arrays to qcel mol """
 
     nA = RA.shape[0]
@@ -73,16 +75,33 @@ def dimerdata_to_qcel(RA, RB, ZA, ZB, aQA, aQB):
     assert abs(tQA - aQA * nA) < 1e-6
     assert abs(tQB - aQB * nB) < 1e-6
 
-    blockA = f"{tQA} {1}\n"
-    for ia in range(nA):
-        blockA += f"{constants.z_to_elem[ZA[ia]]} {RA[ia,0]} {RA[ia,1]} {RA[ia,2]}\n"
+    if not ignore_ch_mult:
+        blockA = f"{tQA} {1}\n"
+        for ia in range(nA):
+            blockA += f"{constants.z_to_elem[ZA[ia]]} {RA[ia,0]} {RA[ia,1]} {RA[ia,2]}\n"
 
-    blockB = f"{tQB} {1}\n"
-    for ib in range(nB):
-        blockB += f"{constants.z_to_elem[ZB[ib]]} {RB[ib,0]} {RB[ib,1]} {RB[ib,2]}\n"
+        blockB = f"{tQB} {1}\n"
+        for ib in range(nB):
+            blockB += f"{constants.z_to_elem[ZB[ib]]} {RB[ib,0]} {RB[ib,1]} {RB[ib,2]}\n"
 
-    dimer = blockA + "--\n" + blockB + "no_com\nno_reorient\nunits angstrom"
-    dimer = qcel.models.Molecule.from_data(dimer)
+        dimer = blockA + "--\n" + blockB + "no_com\nno_reorient\nunits angstrom"
+        dimer = qcel.models.Molecule.from_data(dimer)
+    else:
+        mult_A = (sum(ZA) % 2) + 1
+        mult_B = (sum(ZB) % 2) + 1
+        blockA = f"{tQA} {mult_A}\n"
+        for ia in range(nA):
+            blockA += f"{constants.z_to_elem[ZA[ia]]} {RA[ia,0]} {RA[ia,1]} {RA[ia,2]}\n"
+
+        blockB = f"{tQB} {mult_B}\n"
+        for ib in range(nB):
+            blockB += f"{constants.z_to_elem[ZB[ib]]} {RB[ib,0]} {RB[ib,1]} {RB[ib,2]}\n"
+
+        dimer = blockA + "--\n" + blockB + "no_com\nno_reorient\nunits angstrom"
+        try:
+            dimer = qcel.models.Molecule.from_data(dimer)
+        except:
+            dimer = None
     return dimer
 
 def monomerdata_to_qcel(R, Z, aQ):
@@ -204,6 +223,95 @@ def load_dimer_dataset(file, max_size=None):
 
     return dimers, labels
 
+def load_dG_dataset(file, poses=None, max_size=None, ignore_ch_mult=True):
+    """Load multiple protein-ligand pairs from a :class:`~pandas.DataFrame`
+
+    Loads dimers from the :class:`~pandas.DataFrame` format.
+    Each row of the :class:`~pandas.DataFrame` corresponds to a molecular dimer.
+    In multipose mode, we may have many such configurations of each molecular dimer.
+
+    The columns [`ZA`, `ZB`, `RA`, `RB`] are required.
+    `ZA` and `ZB` are atom types (:class:`~numpy.ndarray` of `int` with shape (`n`,)).
+    `RA` and `RB` are atomic positions in Angstrom (:class:`~numpy.ndarray` of `float` with shape (`n`,3.)).
+
+    The column `label` is optional.
+    This column may describe delta G of binding, pKd, or pKi, depending on target (`float`).
+
+    Parameters
+    ----------
+    file : str
+        The name of a file containing the :class:`~pandas.DataFrame`
+    
+    Returns
+    -------
+    dimers : list of :class:`~qcelemental.models.Molecule`
+    labels : list of :class:`~numpy.ndarray` or None
+        None is returned if SAPT0 label columns are not present in the :class:`~pandas.DataFrame`
+    """
+
+    df = pd.read_pickle(file)
+    N = len(df.index)
+
+    if max_size is not None and max_size < N:
+        df = df.head(max_size)
+        N = max_size
+
+    RA = df.RA.tolist()
+    if len(RA[0][0][0]) == 3 and poses is not None:
+        RA = [RA[i][0:poses] for i in range(len(RA))]
+    RB = df.RB.tolist()
+    ZA = df.ZA.tolist()
+    ZB = df.ZB.tolist()
+
+    aQA = [0 for i in range(N)]
+    aQB = [0 for i in range(N)]
+    try:
+        all_labels = df['label'].to_numpy()
+    except:
+        all_labels = None
+
+    dimers = []
+    labels = []
+
+
+    #with Pool(multiprocessing.cpu_count()) as p:
+    #    input_package = [(RA[i], RB[i], ZA[i], ZB[i], aQA[i], aQB[i], all_labels[i]) for i in range(N)]
+    #    outs = p.map(multiprocess_qcel, input_package)
+    #dimers = [out[0] for out in outs]
+    #labels = [out[1] for out in outs]
+    for i in range(N):
+        if type(RA[i]) is list:
+            configs = []
+            any_conf = False
+            for j in range(len(RA[i])):
+                this_conf = dimerdata_to_qcel(RA[i][j], RB[i], ZA[i], ZB[i], aQA[i], aQB[i], ignore_ch_mult=ignore_ch_mult)
+                if this_conf:
+                    configs.append(this_conf)
+                    any_conf = True
+            if any_conf:
+                labels.append(all_labels[i])
+            #labels.append(all_labels[i])
+            dimers.append(configs)
+            
+        else:
+            this_dim = dimerdata_to_qcel(RA[i], RB[i], ZA[i], ZB[i], aQA[i], aQB[i], ignore_ch_mult=ignore_ch_mult)
+            if this_dim:
+                dimers.append(this_dim)
+            #dimers.append(dimerdata_to_qcel(RA[i], RB[i], ZA[i], ZB[i], aQA[i], aQB[i], ignore_ch_mult=ignore_ch_mult))
+    return dimers, labels
+
+def multiprocess_qcel(inp_package):
+    RA = inp_package[0]
+    RB = inp_package[1]
+    ZA = inp_package[2]
+    ZB = inp_package[3]
+    aQA = inp_package[4]
+    aQB = inp_package[5]
+    label = inp_package[6]
+    configs = []
+    for j in range(len(RA)):
+        configs.append(dimerdata_to_qcel(RA[j], RB, ZA, ZB, aQA, aQB, ignore_ch_mult=True))
+    return (configs, label)
 
 def load_monomer_dataset(file, max_size=None):
     """Load multiple monomers from a :class:`~pandas.DataFrame`
