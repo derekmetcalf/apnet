@@ -3,8 +3,14 @@ General utility functions for pre-processing molecules
 """
 
 import os
+import time
+import apnet
 import multiprocessing
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+import warnings
+import inspect
+import pickle
+import subprocess
 
 import numpy as np
 import pandas as pd
@@ -17,6 +23,8 @@ tf.get_logger().setLevel(logging.ERROR)
 
 from apnet import constants
 from multiprocessing import Pool
+from atom_model import AtomModel
+from pair_model import PairModel
 
 def qcel_to_dimerdata(dimer):
     """ proper qcel mol to ML-ready numpy arrays """
@@ -65,7 +73,6 @@ def qcel_to_monomerdata(monomer):
 
 def dimerdata_to_qcel(RA, RB, ZA, ZB, aQA, aQB, ignore_ch_mult=False):
     """ ML-ready numpy arrays to qcel mol """
-
     nA = RA.shape[0]
     nB = RB.shape[0]
 
@@ -91,11 +98,14 @@ def dimerdata_to_qcel(RA, RB, ZA, ZB, aQA, aQB, ignore_ch_mult=False):
         mult_B = (sum(ZB) % 2) + 1
         blockA = f"{tQA} {mult_A}\n"
         for ia in range(nA):
-            blockA += f"{constants.z_to_elem[ZA[ia]]} {RA[ia,0]} {RA[ia,1]} {RA[ia,2]}\n"
+            if ZA[ia] != 0:
+                blockA += f"{constants.z_to_elem[ZA[ia]]} {RA[ia,0]} {RA[ia,1]} {RA[ia,2]}\n"
 
         blockB = f"{tQB} {mult_B}\n"
         for ib in range(nB):
-            blockB += f"{constants.z_to_elem[ZB[ib]]} {RB[ib,0]} {RB[ib,1]} {RB[ib,2]}\n"
+            if ZB[ib] != 0:
+                blockB += f"{constants.z_to_elem[ZB[ib]]} {RB[ib,0]} {RB[ib,1]} {RB[ib,2]}\n"
+        #mon_test = qcel.models.Molecule.from_data(blockB)
 
         dimer = blockA + "--\n" + blockB + "no_com\nno_reorient\nunits angstrom"
         try:
@@ -213,13 +223,17 @@ def load_dimer_dataset(file, max_size=None):
     aQA = [TQA[i] / np.sum(ZA[i] > 0) for i in range(N)]
     aQB = [TQB[i] / np.sum(ZB[i] > 0) for i in range(N)]
     try:
-        labels = df[['Total_aug', 'Elst_aug', 'Exch_aug', 'Ind_aug', 'Disp_aug']].to_numpy()
+        labs = df[['Total_aug', 'Elst_aug', 'Exch_aug', 'Ind_aug', 'Disp_aug']].to_numpy()
     except:
-        labels = None
+        labs = None
 
     dimers = []
+    labels = []
     for i in range(N):
-        dimers.append(dimerdata_to_qcel(RA[i], RB[i], ZA[i], ZB[i], aQA[i], aQB[i]))
+        dat = dimerdata_to_qcel(RA[i], RB[i], ZA[i], ZB[i], aQA[i], aQB[i])
+        if dat:
+            dimers.append(dimerdata_to_qcel(RA[i], RB[i], ZA[i], ZB[i], aQA[i], aQB[i]))
+            labels.append(labs[i])
 
     return dimers, labels
 
@@ -256,9 +270,10 @@ def load_dG_dataset(file, poses=None, max_size=None, ignore_ch_mult=True):
         df = df.head(max_size)
         N = max_size
 
+    #RA = [df['RA'].iloc[i] for i in range(len(df))]#df.RA.tolist()
     RA = df.RA.tolist()
-    if len(RA[0][0][0]) == 3 and poses is not None:
-        RA = [RA[i][0:poses] for i in range(len(RA))]
+    #if len(RA[0][0][0]) == 3 and poses is not None:
+    #    RA = [RA[i][0:poses] for i in range(len(RA))]
     RB = df.RB.tolist()
     ZA = df.ZA.tolist()
     ZB = df.ZB.tolist()
@@ -266,7 +281,7 @@ def load_dG_dataset(file, poses=None, max_size=None, ignore_ch_mult=True):
     aQA = [0 for i in range(N)]
     aQB = [0 for i in range(N)]
     try:
-        all_labels = df['label'].to_numpy()
+        all_labels = df['label'].to_numpy(np.float32)
     except:
         all_labels = None
 
@@ -280,25 +295,189 @@ def load_dG_dataset(file, poses=None, max_size=None, ignore_ch_mult=True):
     #dimers = [out[0] for out in outs]
     #labels = [out[1] for out in outs]
     for i in range(N):
-        if type(RA[i]) is list:
-            configs = []
-            any_conf = False
-            for j in range(len(RA[i])):
-                this_conf = dimerdata_to_qcel(RA[i][j], RB[i], ZA[i], ZB[i], aQA[i], aQB[i], ignore_ch_mult=ignore_ch_mult)
-                if this_conf:
-                    configs.append(this_conf)
-                    any_conf = True
-            if any_conf:
-                labels.append(all_labels[i])
-            #labels.append(all_labels[i])
+        #if type(RA[i]) is list:
+        configs = []
+        any_conf = False
+        this_conf = dimerdata_to_qcel(RA[i], RB[i], ZA[i], ZB[i], aQA[i], aQB[i], ignore_ch_mult=ignore_ch_mult)
+        #print(this_conf)
+        if this_conf:
+            configs.append(this_conf)
+            labels.append(all_labels[i])
+
+        if len(configs) > 0:
             dimers.append(configs)
             
+        #else:
+        #    this_dim = dimerdata_to_qcel(RA[i], RB[i], ZA[i], ZB[i], aQA[i], aQB[i], ignore_ch_mult=ignore_ch_mult)
+        #    if this_dim:
+        #        dimers.append(this_dim)
+        #    #dimers.append(dimerdata_to_qcel(RA[i], RB[i], ZA[i], ZB[i], aQA[i], aQB[i], ignore_ch_mult=ignore_ch_mult))
+    supp = {}
+    normal_cols = ['RA', 'RB', 'ZA', 'ZB', 'label', 'system']
+    for column in df.columns:
+        if column not in normal_cols:
+            supp[column] = df[column].tolist()
+    if len(supp) == 0:
+        return dimers, labels
+    else: return dimers, labels, supp
+
+def trainval_warn(val_frac):
+    fn_args = inspect.getfullargspec(load_dataset)
+    if val_frac != fn_args.defaults[0]:
+        warnings.warn("This dataset has a fixed train/val split, not setting validation fraction.")
+    return
+
+def load_dataset(set_name, val_frac=0.1):
+    binding_db_sets = ["295", "35", "pdbbind-general"]
+    if set_name == "pdbbind_multi":
+        trainval_warn(val_frac)
+        dim_t, en_t = load_dG_dataset('data/pdbbind_multi_train.pkl', poses=1)
+        dim_v, en_v = load_dG_dataset('data/pdbbind_multi_val.pkl', poses=1)
+    elif set_name == "pdbbind":
+        trainval_warn(val_frac)
+        dim_t, en_t, supp_t = load_dG_dataset('data/pdbbind_pocket_train.pkl', poses=1)
+        dim_v, en_v, supp_v = load_dG_dataset('data/pdbbind_pocket_val.pkl', poses=1)
+        return dim_t, en_t, supp_t, dim_v, en_v, supp_t
+    elif set_name == "pdbbind_multi_smol":    
+        trainval_warn(val_frac)
+        dim_t, en_t = load_dG_dataset('data/pdbbind_multi_smol.pkl', poses=1)
+        dim_v, en_v = load_dG_dataset('data/pdbbind_multi_smol.pkl', poses=1)
+    elif set_name == "4MXO":
+        trainval_warn(val_frac)
+        dim_t, en_t = load_dG_dataset('data/4MXO_target/4MXO_pocket_train/dimers.pkl', poses=1)
+        dim_v, en_v = load_dG_dataset('data/4MXO_target/4MXO_pocket_val/dimers.pkl', poses=1)
+    elif set_name == "505":
+        trainval_warn(val_frac)
+        dim_t, en_t = load_dG_dataset('data/sets/505_train/dimers.pkl', poses=1)
+        dim_v, en_v = load_dG_dataset('data/sets/505_val/dimers.pkl', poses=1)
+    elif set_name in binding_db_sets:
+        np.random.seed(4201)
+        if set_name == "pdbbind-general":
+            dim, en = load_dG_dataset(f'data/PDBbind-general-v2020/dimers.pkl', poses=1)
         else:
-            this_dim = dimerdata_to_qcel(RA[i], RB[i], ZA[i], ZB[i], aQA[i], aQB[i], ignore_ch_mult=ignore_ch_mult)
-            if this_dim:
-                dimers.append(this_dim)
-            #dimers.append(dimerdata_to_qcel(RA[i], RB[i], ZA[i], ZB[i], aQA[i], aQB[i], ignore_ch_mult=ignore_ch_mult))
-    return dimers, labels
+            dim, en = load_dG_dataset(f'data/sets/set{set_name}/dimers.pkl', poses=1)
+        shuffler = np.random.permutation(len(en))
+        dim_shuff = [dim[i] for i in shuffler]
+        en_shuff = [en[i] for i in shuffler]
+        train_len = np.ceil(float(len(en_shuff)) * (1 - val_frac))
+        dim_t = []
+        en_t = []
+        dim_v = []
+        en_v = []
+        for i in range(len(en_shuff)):
+            if i <= train_len:
+                dim_t.append(dim_shuff[i])
+                en_t.append(en_shuff[i])
+            else:
+                dim_v.append(dim_shuff[i])
+                en_v.append(en_shuff[i])
+    return dim_t, en_t, None, dim_v, en_v, None
+
+def test_dataset(set_name, model_path):
+    dim_t, en_t, supp_t, dim_v, en_v, supp_v = load_dataset(set_name)
+    atom_model = AtomModel().from_file('atom_models/atom_model2')
+    pair_model = PairModel().from_file(model_path)
+    print("\nProcessing Dataset...", flush=True)
+    time_loaddata_start = time.time()
+    Nv = len(dim_v)
+    inds_v = np.arange(Nv)
+    #data_loader_t = apnet.pair_model.PairDataLoader(dim_t, en_t, 5.0, r_cut_im)
+    data_loader_v = apnet.pair_model.PairDataLoader(dim_v, en_v, 5.0, 5.0)
+    dt_loaddata = time.time() - time_loaddata_start
+    print(f"...Done in {dt_loaddata:.2f} seconds", flush=True)
+    preds_v = []
+    energy_v = en_v
+    for inds in inds_v:
+        inp_v_chunk = data_loader_v.get_data([inds])
+        preds_v.append(pair_model.model(inp_v_chunk[0]))
+ 
+    preds = np.array(preds_v)
+    labs = np.array(energy_v)
+
+    return preds, labs
+
+def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=None, mode='lig', val_frac=0.2):
+    dim_t, en_t, supp_t, dim_v, en_v, supp_v = load_dataset(set_name, val_frac)
+    dock_vars = ["Prime energy", "Docking score", "MMGBSA dG Bind"]
+    ext_t = []
+    ext_v = []
+    if supp_t:
+        for key, value in supp_t.items():
+            if key in dock_vars:
+                ext_t.append(value)
+                ext_v.append(supp_v[key])
+    naive_model = np.mean(en_t) - en_v
+    print(f'Mean training label        : {np.mean(en_t)}')
+    print(f'Mean validation label      : {np.mean(en_v)}')
+    print(f'Naive validation RMSE      : {np.sqrt(np.mean(np.square(naive_model)))}')
+
+    atom_model = AtomModel().from_file('atom_models/atom_model2')
+    if xfer is not None:
+        pair_model = PairModel(atom_model=atom_model, mode=mode).from_file(xfer_path)
+    elif delta_base is not None:
+        delta_base_model = PairModel(atom_model=atom_model, mode='lig').from_file(delta_base)
+        #base_val_preds = []
+        #for dim in dim_v:
+        #    base_val_preds.append(delta_base_model.model(dim, training=False))
+        #base_errs = np.array(base_val_preds) - en_v
+        #print(f'Base model validation RMSE : {np.sqrt(np.mean(np.square(base_errs)))}')
+        pair_model = PairModel(atom_model=atom_model, delta_base=delta_base_model, mode=mode)
+    else:
+        pair_model = PairModel(atom_model=atom_model, mode=mode)
+    
+
+    
+    if modelsuffix is not None:
+        modelname = f'{set_name}_{mode}_{modelsuffix}'
+        pair_model.train(dim_t, en_t, dim_v, en_v, f'pair_models/{modelname}', n_epochs=epochs, ext_t=ext_t, ext_v=ext_v)
+    else:
+        pair_model.train(dim_t, en_t, dim_v, en_v, n_epochs=epochs, ext_t=ext_t, ext_v=ext_v)
+   
+    return pair_model
+
+def get_folds(X, y, folds):
+    sz = np.ceil(float(len(X)) / float(folds))
+    Xs = []
+    ys = []
+    for i in range(folds):
+        start = int(i*sz)
+        end = int((i+1)*sz)
+        Xs.append(X[start:end])
+        ys.append(y[start:end])
+    return Xs, ys
+
+def train_crossval(set_name, modelsuffix, epochs, delta_base=None, xfer=None, mode='lig', val_frac=0.2, folds=5):
+    DIM_t, EN_t, SUPP_t, DIM_v, EN_v, SUPP_v = load_dataset(set_name, val_frac)
+    dim_ts, en_ts = get_folds(DIM_t, EN_t, folds)
+
+    models = []
+    for fold in range(folds):
+        #atom_model = AtomModel().from_file('atom_models/atom_model2')
+        #pair_model = PairModel(atom_model=atom_model, mode=mode)
+        t_dim_folds = [dim_ts[x] for x in range(folds) if x != fold]
+        t_en_folds = [en_ts[x] for x in range(folds) if x != fold]
+        dim_t = []
+        en_t = []
+        for i, dim_fold in enumerate(t_dim_folds):
+            for j, dim in enumerate(dim_fold):
+                dim_t.append(dim)
+                en_t.append(t_en_folds[i][j])
+        dim_v = dim_ts[fold]
+        en_v = en_ts[fold]
+        pickle.dump((dim_t, en_t), open(f"tmp/{fold}train.pkl", "wb"))
+        pickle.dump((dim_v, en_v), open(f"tmp/{fold}val.pkl", "wb"))
+        if modelsuffix is not None:
+            modelname = f'{set_name}_{mode}_{modelsuffix}_fold{fold}'
+
+        f = open(f"pair_models/{modelname}.out", "w")
+        print(f"\n\nStarting fold {fold}")
+        subprocess.call(f"python train.py tmp/{fold}train.pkl tmp/{fold}val.pkl {modelname} {mode} {epochs}", shell=True, stdout=f)
+        #    pair_model.train(dim_t, en_t, dim_v, en_v, f'pair_models/{modelname}_fold{fold}', n_epochs=epochs)
+        #else:
+        #    pair_model.train(dim_t, en_t, dim_v, en_v, n_epochs=epochs)
+    return
+
+    
 
 def multiprocess_qcel(inp_package):
     RA = inp_package[0]

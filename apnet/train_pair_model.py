@@ -1,17 +1,26 @@
 import apnet
 import pandas as pd
 import numpy as np
-from atom_model import AtomModel
-from pair_model import PairModel
 
-#dim_t, en_t = apnet.util.load_dG_dataset('data/pdbbind_multi_smol.pkl', poses=4)
-#dim_v, en_v = apnet.util.load_dG_dataset('data/pdbbind_multi_smol.pkl', poses=4)
-dim_t, en_t = apnet.util.load_dG_dataset('data/pdbbind_multi_train.pkl', poses=3)
-dim_v, en_v = apnet.util.load_dG_dataset('data/pdbbind_multi_val.pkl', poses=3)
+import matplotlib.pyplot as plt
 
-atom_model = AtomModel().from_file('atom_models/atom_model2')
 
-pair_model = PairModel(atom_model=atom_model, multipose=True)
-#pair_model = PairModel(multipose=True)
-pair_model.train(dim_t, en_t, dim_v, en_v, 'pair_models/pdbbind_3pose_attention_att1', n_epochs=1000)
 
+if __name__ == "__main__":
+   
+    #xfer_path = 'pair_models/pdbbind_pdbbind_pair_prot_lig_readout_dropout_1'
+    xfer_path = None
+    set_name = "pdbbind"
+    # mode options are: 'lig', 'lig-pair', 'prot-lig-pair'
+    mode = "lig-pair"
+    #suffix = "prot-lig-pair-att1-highlr"
+    #suffix = "att-1"
+    suffix = "meetingmodel"
+    #suffix=None
+    #delta_path = 'pair_models/4MXO_lig_simple2'
+    delta_path = None
+
+    n_epochs=500
+    
+    apnet.util.train_single(set_name, suffix, n_epochs, delta_base=delta_path, xfer=xfer_path, mode=mode, val_frac=0.1)
+    #apnet.util.train_crossval(set_name, suffix, n_epochs, delta_base=delta_path, xfer=xfer_path, mode=mode, val_frac=0.1, folds=5)

@@ -62,14 +62,17 @@ class FeedForwardLayer(layers.Layer):
     """
     Convenience layer for defining a feed-forward neural network (a number of sequential dense layers)
     """
-    def __init__(self, layer_sizes, layer_activations, name, **kwargs):
+    def __init__(self, layer_sizes, layer_activations, name, dropout=0.0, **kwargs):
         super().__init__(name=name, **kwargs)
 
         n_layers = len(layer_sizes)
         assert n_layers == len(layer_activations)
-
-        self.layer_list = [layers.Dense(layer_sizes[i], activation=layer_activations[i]) for i in range(n_layers)]
-
+        
+        self.layer_list = []
+        for i in range(n_layers):
+            self.layer_list.append(layers.Dense(layer_sizes[i], activation=layer_activations[i]))
+            if dropout != 0.0:
+                self.layer_list.append(layers.Dropout(dropout))
 
     def call(self, inputs):
 
@@ -92,33 +95,34 @@ class SimpleDistanceLayer(layers.Layer):
 
 class EdgeAttention(layers.Layer):
     """
-    Simple attention mechanism to create an atom-pair importance matrix (attention weights),
-    an  'interaction vector' description of the entire system, and finally a readout to a
-    target scalar quantity
+    Simple attention mechanism to create an atom-pair importance matrix (attention weights)
+    and an 'interaction vector' description of the entire system, to later be read-out to
+    a target scalar quantity
     """
-    def __init__(self, heads, layer_dim, name, **kwargs):
+    def __init__(self, heads, layer_dim, name, scale_param, **kwargs):
         super().__init__(name=name, **kwargs)
         weight_init = tf.keras.initializers.GlorotNormal()
         #self.weight_mats = [tf.Variable(weight_init(shape=(layer_dim,layer_dim))) for i in range(heads)]
         self.weight_vecs = [tf.Variable(weight_init(shape=(1, layer_dim))) for i in range(heads)]
         self.dot = tf.keras.layers.Dot(axes=1)
+        self.scale_param = scale_param
 
     def call(self, inputs):
         head_coeffs = []
         head_outs = []
-        inputs = inputs * 1e-1
+        inputs = inputs * self.scale_param
         for i, weight_vec in enumerate(self.weight_vecs):
             tiled_weights = tf.tile(weight_vec, [tf.shape(inputs)[0], 1])
             unnorm_coeffs = tf.nn.selu(self.dot([tiled_weights, inputs]))
             exp_sum = tf.math.reduce_sum(tf.math.exp(unnorm_coeffs))
             att_coeffs = tf.math.exp(unnorm_coeffs) / exp_sum
             weighted_inps = att_coeffs * inputs
-            #head_output = tf.reduce_sum(weighted_inps, axis=0)
-            #print(head_output.shape)
             head_coeffs.append(att_coeffs)
             head_outs.append(weighted_inps)
-        #outputs = tf.reduce_sum(head_outs, axis=0)
-        outputs = tf.concat(head_outs, axis=-1)
+        outputs = tf.math.reduce_sum(head_outs, axis=1)
+        outputs = tf.math.reduce_mean(outputs, axis=0)
+        outputs = tf.nn.selu(outputs)
+        #tf.print(self.weight_vec)
         return outputs
 
 
