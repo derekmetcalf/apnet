@@ -327,8 +327,12 @@ def trainval_warn(val_frac):
         warnings.warn("This dataset has a fixed train/val split, not setting validation fraction.")
     return
 
-def load_dataset(set_name, val_frac=0.1):
+def load_dataset(train_path=None, val_path=None, set_name=None, val_frac=0.1):
     binding_db_sets = ["295", "35", "pdbbind-general"]
+    dim_t = None
+    en_t = None
+    dim_v = None
+    en_v = None
     if set_name == "pdbbind_multi":
         trainval_warn(val_frac)
         dim_t, en_t = load_dG_dataset('data/pdbbind_multi_train.pkl', poses=1)
@@ -371,10 +375,15 @@ def load_dataset(set_name, val_frac=0.1):
             else:
                 dim_v.append(dim_shuff[i])
                 en_v.append(en_shuff[i])
+
+    if train_path is not None:
+        dim_t, en_t = load_dG_dataset(os.path.join(train_path, 'dimers.pkl'), poses=1)
+    if val_path is not None:
+        dim_v, en_v = load_dG_dataset(os.path.join(val_path, 'dimers.pkl'), poses=1)
     return dim_t, en_t, None, dim_v, en_v, None
 
-def test_dataset(set_name, model_path):
-    dim_t, en_t, supp_t, dim_v, en_v, supp_v = load_dataset(set_name)
+def test_dataset(model_path=None, val_path=None, set_name=None):
+    dim_t, en_t, supp_t, dim_v, en_v, supp_v = load_dataset(val_path=val_path, set_name=set_name)
     atom_model = AtomModel().from_file('atom_models/atom_model2')
     pair_model = PairModel().from_file(model_path)
     print("\nProcessing Dataset...", flush=True)
@@ -397,7 +406,7 @@ def test_dataset(set_name, model_path):
     return preds, labs
 
 def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=None, mode='lig', val_frac=0.2):
-    dim_t, en_t, supp_t, dim_v, en_v, supp_v = load_dataset(set_name, val_frac)
+    dim_t, en_t, supp_t, dim_v, en_v, supp_v = load_dataset(set_name=set_name, val_frac=val_frac)
     dock_vars = ["Prime energy", "Docking score", "MMGBSA dG Bind"]
     ext_t = []
     ext_v = []

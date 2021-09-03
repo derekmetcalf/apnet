@@ -10,12 +10,12 @@ if __name__ == "__main__":
    
     #xfer_path = 'pair_models/pdbbind_pdbbind_pair_prot_lig_readout_dropout_1'
     xfer_path = None
-    set_name = "pdbbind"
+    set_name = "4MXO"
     # mode options are: 'lig', 'lig-pair', 'prot-lig-pair'
-    mode = "lig-pair"
+    mode = "lig"
     #suffix = "prot-lig-pair-att1-highlr"
     #suffix = "att-1"
-    suffix = "meetingmodel"
+    suffix = "example-model5"
     #suffix=None
     #delta_path = 'pair_models/4MXO_lig_simple2'
     delta_path = None
