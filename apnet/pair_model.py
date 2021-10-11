@@ -8,6 +8,8 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).parent
 
 import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import backend as K
 #tf.config.run_functions_eagerly(True) #eager tf is dummy slow
 
 from apnet.keras_pair_model import KerasPairModel, KerasDeltaModel
@@ -17,7 +19,7 @@ from multiprocessing import Pool, get_context
 class PairDataLoader:
     """ todo """
 
-    def __init__(self, dimers, energies, r_cut, r_cut_im):
+    def __init__(self, dimers, energies, r_cut, r_cut_im, online_aug=False):
 
         self.r_cut = r_cut
         self.r_cut_im = r_cut_im
@@ -26,6 +28,7 @@ class PairDataLoader:
             #print(len(energies))
             #print(self.N)
             assert len(energies) == self.N
+        self.online_aug = online_aug
 
         self.RA_list = []
         self.RB_list = []
@@ -178,9 +181,21 @@ class PairDataLoader:
 
         offsetA, offsetB = 0, 0
         for i, ind in enumerate(inds): # terrible enumeration variable names
-            inp['RA'].append(self.RA_list[ind])
+            if self.online_aug:
+                this_RA = self.RA_list[ind]
+                this_RB = self.RB_list[ind]
+                normal_A = np.random.normal(size=this_RA.shape)
+                normal_B = np.random.normal(size=this_RB.shape)
+                uniform_A = np.random.rand(this_RA.shape[0], this_RA.shape[1])
+                uniform_B = np.random.rand(this_RB.shape[0], this_RB.shape[1])
+                mag_A = np.sqrt(np.reduce_sum(np.square(this_RA, axis=-1)))
+                mag_B = np.sqrt(np.reduce_sum(np.square(this_RB, axis=-1)))
+                inp['RA'].append(this_RA + 0.1 * (uniform_A * normal_A / mag_A))
+                inp['RB'].append(this_RB + 0.1 * (uniform_B * normal_B / mag_B))
+            else:
+                inp['RA'].append(self.RA_list[ind])
+                inp['RB'].append(self.RB_list[ind])
             inp['ZA'].append(self.ZA_list[ind])
-            inp['RB'].append(self.RB_list[ind])
             inp['ZB'].append(self.ZB_list[ind])
             inp['total_charge_A'].append([self.total_charge_A_list[ind]])
             inp['total_charge_B'].append([self.total_charge_B_list[ind]])
@@ -327,12 +342,15 @@ class PairModel:
         # todo : better atom_model handling
         self.atom_model = atom_model
         self.delta_base = delta_base
+        message_passing = kwargs.get("message_passing", False)
+        attention = kwargs.get("attention", False)
+        dropout = kwargs.get("dropout", 0.2)
         if delta_base is not None:
-            self.model = KerasDeltaModel(delta_base.model, atom_model.model, mode=mode)
+            self.model = KerasDeltaModel(delta_base.model, atom_model.model, mode=mode, message_passing=message_passing, attention=attention, dropout=dropout)
         elif atom_model is not None:
-            self.model = KerasPairModel(atom_model.model, mode=mode)
+            self.model = KerasPairModel(atom_model.model, mode=mode, message_passing=message_passing, attention=attention, dropout=dropout)
         else:
-            self.model = KerasPairModel(mode=mode)
+            self.model = KerasPairModel(mode=mode, message_passing=message_passing, attention=attention, dropout=dropout)
 
     @classmethod
     def from_file(cls, model_path):
@@ -370,7 +388,6 @@ class PairModel:
             print("~~ Training Delta Model ~~", flush=True)
         else:
             print("~~ Training Pair Model ~~", flush=True)
-        # todo : print time and date. maybe machine specs?
 
         if model_path is not None:
             print(f"\nSaving model to '{model_path}'", flush=True)
@@ -384,6 +401,9 @@ class PairModel:
         n_embed = kwargs.get("n_embed", 8)
         n_rbf = kwargs.get("n_rbf", 8)
         r_cut_im = kwargs.get("r_cut_im", 5.0)
+
+        online_aug = kwargs.get("online_aug", False)        
+
         ext_t = kwargs.get("ext_t", [])
         ext_v = kwargs.get("ext_v", [])
 
@@ -398,13 +418,11 @@ class PairModel:
         n_epochs = kwargs.get("n_epochs", 15)
         batch_size = kwargs.get("batch_size", 1)
         learning_rate = kwargs.get("learning_rate", 0.0020)
-        learning_rate_decay = 0.0 #TODO
 
         print("\nTraining Hyperparameters:", flush=True)
         print(f"  {n_epochs=}", flush=True)
         print(f"  {batch_size=}", flush=True)
         print(f"  {learning_rate=}", flush=True)
-        print(f"  {learning_rate_decay=}", flush=True)
 
         Nt = len(dimers_t)
         Nv = len(dimers_v)
@@ -471,11 +489,19 @@ class PairModel:
         if model_path is not None:
             self.model.save(model_path)
 
-        if False:
-            learning_rate_scheduler = keras.optimizers.schedules.ExponentialDecay(initial_learning_rate=learning_rate, decay_steps=(num_batches * 60), decay_rate=0.5, staircase=True)
-            optimizer = keras.optimizers.Adam(learning_rate=learning_rate_scheduler)
-        else:
-            optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+        #learning_rate_scheduler = keras.optimizers.schedules.ExponentialDecay(initial_learning_rate=learning_rate, decay_steps=(num_batches * 60), decay_rate=0.5, staircase=True)
+        #learning_rate_scheduler = tf.keras.optimizers.schedules.CosineDecayRestarts(initial_learning_rate=learning_rate, first_decay_steps=(num_batches * 75), t_mul=2.0, m_mul=1.0)
+        warmup_epoch = 5
+        warmup_steps = int(warmup_epoch * num_batches)
+        total_steps = n_epochs * num_batches
+        learning_rate_sched = WarmUpCosineDecayScheduler(learning_rate_base=learning_rate,
+                                                                   total_steps=total_steps,
+                                                                   warmup_learning_rate=0.0,
+                                                                   warmup_steps=warmup_steps,
+                                                                   hold_base_rate_steps=0)
+        #scheduler = learning_rate_sched.scheduler
+        #callback = tf.keras.callbacks.LearningRateScheduler(learning_rate_sched)
+        optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate_sched)
 
         loss_fn = tf.keras.losses.MSE
 
@@ -572,6 +598,126 @@ class PairModel:
     # Possible TODO: predict_elst, transfer_learning, gradient
 
 
+def cosine_decay_with_warmup(global_step,
+                             learning_rate_base,
+                             total_steps,
+                             warmup_learning_rate=0.0,
+                             warmup_steps=0,
+                             hold_base_rate_steps=0):
+    """Cosine decay schedule with warm up period.
+
+    Cosine annealing learning rate as described in:
+      Loshchilov and Hutter, SGDR: Stochastic Gradient Descent with Warm Restarts.
+      ICLR 2017. https://arxiv.org/abs/1608.03983
+    In this schedule, the learning rate grows linearly from warmup_learning_rate
+    to learning_rate_base for warmup_steps, then transitions to a cosine decay
+    schedule.
+
+    Arguments:
+        global_step {int} -- global step.
+        learning_rate_base {float} -- base learning rate.
+        total_steps {int} -- total number of training steps.
+
+    Keyword Arguments:
+        warmup_learning_rate {float} -- initial learning rate for warm up. (default: {0.0})
+        warmup_steps {int} -- number of warmup steps. (default: {0})
+        hold_base_rate_steps {int} -- Optional number of steps to hold base learning rate
+                                    before decaying. (default: {0})
+    Returns:
+      a float representing learning rate.
+
+    Raises:
+      ValueError: if warmup_learning_rate is larger than learning_rate_base,
+        or if warmup_steps is larger than total_steps.
+    """
+
+    if total_steps < warmup_steps:
+        raise ValueError('total_steps must be larger or equal to '
+                         'warmup_steps.')
+    learning_rate = 0.5 * learning_rate_base * (1 + tf.math.cos(
+        tf.constant(np.pi) *
+        (global_step - warmup_steps - hold_base_rate_steps
+         ) / float(total_steps - warmup_steps - hold_base_rate_steps)))
+    if hold_base_rate_steps > 0:
+        learning_rate = tf.where(global_step > warmup_steps + hold_base_rate_steps,
+                                 learning_rate, learning_rate_base)
+    if warmup_steps > 0:
+        if learning_rate_base < warmup_learning_rate:
+            raise ValueError('learning_rate_base must be larger or equal to '
+                             'warmup_learning_rate.')
+        slope = (learning_rate_base - warmup_learning_rate) / warmup_steps
+        warmup_rate = slope * global_step + warmup_learning_rate
+        learning_rate = tf.where(global_step < warmup_steps, warmup_rate,
+                                 learning_rate)
+    return tf.where(global_step > total_steps, 0.0, learning_rate)
+
+
+class WarmUpCosineDecayScheduler(tf.keras.optimizers.schedules.LearningRateSchedule):
+    """Cosine decay with warmup learning rate scheduler
+	From https://github.com/Tony607/Keras_Bag_of_Tricks/blob/master/warmup_cosine_decay_scheduler.py
+    """
+
+    def __init__(self,
+                 learning_rate_base,
+                 total_steps,
+                 global_step_init=0,
+                 warmup_learning_rate=0.0,
+                 warmup_steps=0,
+                 hold_base_rate_steps=0,
+                 verbose=0):
+        """Constructor for cosine decay with warmup learning rate scheduler.
+
+    Arguments:
+        learning_rate_base {float} -- base learning rate.
+        total_steps {int} -- total number of training steps.
+
+    Keyword Arguments:
+        global_step_init {int} -- initial global step, e.g. from previous checkpoint.
+        warmup_learning_rate {float} -- initial learning rate for warm up. (default: {0.0})
+        warmup_steps {int} -- number of warmup steps. (default: {0})
+        hold_base_rate_steps {int} -- Optional number of steps to hold base learning rate
+                                    before decaying. (default: {0})
+        verbose {int} -- 0: quiet, 1: update messages. (default: {0})
+        """
+
+        super(WarmUpCosineDecayScheduler, self).__init__()
+        self.learning_rate_base = learning_rate_base
+        self.total_steps = total_steps
+        self.global_step = global_step_init
+        self.warmup_learning_rate = warmup_learning_rate
+        self.warmup_steps = warmup_steps
+        self.hold_base_rate_steps = hold_base_rate_steps
+        self.verbose = verbose
+        self.learning_rates = []
+        global global_step_var
+        global_step_var = 0
+
+    def __call__(self, step):
+        #self.global_step = self.global_step + 1
+        lr = cosine_decay_with_warmup(global_step=step,#self.global_step,
+                                        learning_rate_base=self.learning_rate_base,
+                                        total_steps=self.total_steps,
+                                        warmup_learning_rate=self.warmup_learning_rate,
+                                        warmup_steps=self.warmup_steps,
+                                        hold_base_rate_steps=self.hold_base_rate_steps)
+        return lr
+
+    def on_batch_end(self, batch, logs=None):
+        self.global_step = self.global_step + 1
+        lr = K.get_value(self.model.optimizer.lr)
+        self.learning_rates.append(lr)
+
+    def on_batch_begin(self, batch, logs=None):
+        lr = cosine_decay_with_warmup(global_step=self.global_step,
+                                      learning_rate_base=self.learning_rate_base,
+                                      total_steps=self.total_steps,
+                                      warmup_learning_rate=self.warmup_learning_rate,
+                                      warmup_steps=self.warmup_steps,
+                                      hold_base_rate_steps=self.hold_base_rate_steps)
+        K.set_value(self.model.optimizer.lr, lr)
+        if self.verbose > 0:
+            print('\nBatch %05d: setting learning '
+                  'rate to %s.' % (self.global_step + 1, lr))
 
 
 def softmax(values):

@@ -36,8 +36,9 @@ def get_messages(h0, h, rbf, e_source, e_target):
 
     h0_source = tf.gather(h0, e_source)
     h0_target = tf.gather(h0, e_target)
-    h_source = tf.gather(h, e_source)
-    h_target = tf.gather(h, e_target)
+    h_source =  tf.gather(h, e_source)
+    h_target =  tf.gather(h, e_target)
+
 
     h_all = tf.concat([h0_source, h0_target, h_source, h_target], axis=-1)
 
@@ -45,6 +46,30 @@ def get_messages(h0, h, rbf, e_source, e_target):
     h_all_dot = tf.reshape(h_all_dot, (nedge, -1))
 
     return tf.concat([h_all, h_all_dot, rbf], axis=-1)
+
+def normalize(tensor, axis=0):
+    # expand_dims ensures tensors are broadcasted back to original shape correctly
+    tensor_mean = tf.expand_dims(tf.reduce_mean(tensor, axis=axis), axis=axis)
+    tensor_std = tf.expand_dims(tf.math.reduce_std(tensor, axis=axis), axis=axis)
+    normed_tensor = (tensor - tensor_mean) / tensor_std
+    return normed_tensor
+
+def get_pair_dir(hA, hB, hA_dir, hB_dir, rbf, e_source, e_target):
+    feat_consts = 1.e-6
+
+    hA_source = normalize(tf.gather(hA, e_source)) # [p, f]
+    hB_target = normalize(tf.gather(hB, e_target)) # [p, f]
+    hA_dir_source = normalize(tf.gather(hA_dir, e_source)) # [p, 3, f]
+    hB_dir_target = normalize(tf.gather(hB_dir, e_target)) # [p, 3, f]
+    hAB_dir_dot = tf.einsum('pxf,pxf->pf', hA_dir_source, hB_dir_target) # [p, f]
+    hA_dir_mag = tf.math.sqrt(tf.einsum('pxf,pxf->pf', hA_dir_source, hA_dir_source)) # [p, f]
+    hB_dir_mag = tf.math.sqrt(tf.einsum('pxf,pxf->pf', hB_dir_target, hB_dir_target)) # [p, f]
+    hAB_dir_cosangle = normalize(hAB_dir_dot / (hA_dir_mag * hB_dir_mag + 1e-2)) # [p, f]
+    normed_dir_dot = normalize(hAB_dir_dot)
+    normed_magA = normalize(hA_dir_mag)
+    normed_magB = normalize(hB_dir_mag)
+
+    return tf.concat([hA_source*feat_consts, hB_target*feat_consts, rbf*feat_consts, hA_dir_mag*feat_consts, hB_dir_mag*feat_consts, hAB_dir_dot*feat_consts, hAB_dir_cosangle*feat_consts], axis=-1)
 
 def get_pair(hA, hB, rbf, e_source, e_target):
 
@@ -56,7 +81,7 @@ def get_pair(hA, hB, rbf, e_source, e_target):
 
 class KerasPairModel(tf.keras.Model):
 
-    def __init__(self, atom_model=None, n_message=3, n_rbf=8, n_neuron=128, n_embed=8, r_cut_im=8.0, scale_init=-1.e-2, shift_init=7.808, mode='lig-pair'):
+    def __init__(self, atom_model=None, n_message=3, n_rbf=8, n_neuron=128, n_embed=8, r_cut_im=8.0, scale_init=-1.e-8, shift_init=7.808, mode='lig-pair', attention=False, **kwargs):
         super(KerasPairModel, self).__init__()
 
         # pre-trained atomic model for predicting atomic properties
@@ -71,6 +96,9 @@ class KerasPairModel(tf.keras.Model):
         self.n_embed = n_embed
         self.r_cut_im = r_cut_im
         self.mode = mode
+        self.attention = attention
+        self.message_pass = kwargs.get("message_passing", False)
+        self.dropout = kwargs.get("dropout", 0.2)
         #self.r_cut = 5.0
 
         # embed interatomic distances into large orthogonal basis
@@ -89,33 +117,50 @@ class KerasPairModel(tf.keras.Model):
         # the architecture contains many feed-forward dense nets with a tapered architecture
         layer_nodes_hidden = [n_neuron * 2, n_neuron, n_neuron // 2, n_embed]
         layer_nodes_readout = [n_neuron * 2, n_neuron, n_neuron // 2, 1]
-        layer_activations = ["relu", "relu", "relu", "linear"]
+        layer_activations = ["selu", "selu", "selu", "linear"]
 
         #self.readout_layer = FeedForwardLayer(layer_nodes_readout, layer_activations, f'readout_layer')
-        dropout = 0.2
-        self.pair_readout = FeedForwardLayer(layer_nodes_readout, layer_activations, f'pair_readout', dropout=dropout)
-        self.lig_readout = FeedForwardLayer(layer_nodes_readout, layer_activations, f'lig_readout', dropout=dropout)
-        self.prot_readout = FeedForwardLayer(layer_nodes_readout, layer_activations, f'prot_readout', dropout=dropout)
+        self.pair_readout = FeedForwardLayer(layer_nodes_readout, layer_activations, f'pair_readout', dropout=self.dropout)
+        self.lig_readout = FeedForwardLayer(layer_nodes_readout, layer_activations, f'lig_readout', dropout=self.dropout)
+        self.prot_readout = FeedForwardLayer(layer_nodes_readout, layer_activations, f'prot_readout', dropout=self.dropout)
+
+        #self.atom_const = tf.Variable(1e-4)
+        self.atom_const = tf.Variable(1e-6)
 
         # if desired, do a simple edge attention layer over the edges
-        self.edge_dim = 2* (n_embed * 5) + n_rbf
-        self.edge_attention = EdgeAttention(15, self.edge_dim, 'edge_attention', self.scale) 
+        if self.attention:
+            self.edge_dim = 4 * (1 + self.n_message) * n_embed + n_rbf + 4 * self.n_message * n_embed 
+            self.edge_attention = EdgeAttention(5, self.edge_dim, 'edge_attention', self.scale) 
+            self.pair_const = tf.Variable(1.)
+        else:
+            self.pair_const = tf.Variable(3e-10)
 
         # embed distances into large orthogonal basis
         self.distance_layer = DistanceLayer(n_rbf, 5.0)
 
-        self.update_layers = []
-        self.readout_layers = []
-        self.directional_layers = []
-        self.directional_readout_layers = []
+        self.batchnorm = tf.keras.layers.BatchNormalization()
+
+        self.update_layersA = []
+        self.readout_layersA = []
+        self.directional_layersA = []
+        self.directional_readout_layersA = []
+        self.update_layersB = []
+        self.readout_layersB = []
+        self.directional_layersB = []
+        self.directional_readout_layersB = []
 
         for i in range(self.n_message):
 
-            self.update_layers.append(FeedForwardLayer(layer_nodes_hidden, layer_activations, f'update_layer_{i}'))
-            self.readout_layers.append(FeedForwardLayer(layer_nodes_readout, layer_activations, f'readout_layer_{i}'))
+            self.update_layersA.append(FeedForwardLayer(layer_nodes_hidden, layer_activations, f'update_layer_A{i}'))
+            self.readout_layersA.append(FeedForwardLayer(layer_nodes_readout, layer_activations, f'readout_layer_A{i}'))
 
-            self.directional_layers.append(FeedForwardLayer(layer_nodes_hidden, layer_activations, f'directional_layer_{i}'))
-            self.directional_readout_layers.append(tf.keras.layers.Dense(1, activation='linear'))
+            self.directional_layersA.append(FeedForwardLayer(layer_nodes_hidden, layer_activations, f'directional_layer_A{i}'))
+            self.directional_readout_layersA.append(tf.keras.layers.Dense(1, activation='linear'))
+            self.update_layersB.append(FeedForwardLayer(layer_nodes_hidden, layer_activations, f'update_layer_B{i}'))
+            self.readout_layersB.append(FeedForwardLayer(layer_nodes_readout, layer_activations, f'readout_layer_B{i}'))
+
+            self.directional_layersB.append(FeedForwardLayer(layer_nodes_hidden, layer_activations, f'directional_layer_B{i}'))
+            self.directional_readout_layersB.append(tf.keras.layers.Dense(1, activation='linear'))
 
     def mtp_elst(self, qA, muA, quadA, qB, muB, quadB, e_ABsr_source, e_ABsr_target, dR_ang, dR_xyz_ang):
 
@@ -235,84 +280,88 @@ class KerasPairModel(tf.keras.Model):
                 'total_charge' : inputs['total_charge_B'][0]
         }
 
-        qA, muA, quadA, hlistA = self.atom_model(inputsA)
-        qB, muB, quadB, hlistB = self.atom_model(inputsB)
-        
-        atom_hA = tf.concat(hlistA, axis=-1)
-        atom_hB = tf.concat(hlistB, axis=-1)
-
-
-        ################################################################
-        ### predict SAPT components via intramonomer message passing ###
-        ################################################################
-        
-        # invariant hidden state lists
-        # each list element is [natomA/B x nembed]
         hA_list = [tf.keras.layers.Flatten()(self.embed_layer(ZA))]
         hB_list = [tf.keras.layers.Flatten()(self.embed_layer(ZB))]
-        #hA_list = tf.keras.layers.Flatten()(self.embed_layer(ZA))
-        #hB_list = tf.keras.layers.Flatten()(self.embed_layer(ZB))
-        hA_list.append(atom_hA)
-        hB_list.append(atom_hB)
+
+        if self.atom_model is not None:
+            qA, muA, quadA, hlistA = self.atom_model(inputsA)
+            qB, muB, quadB, hlistB = self.atom_model(inputsB)
+        
+            atom_hA = tf.concat(hlistA, axis=-1)
+            atom_hB = tf.concat(hlistB, axis=-1)
+            hA_list.append(atom_hA)
+            hB_list.append(atom_hB)
+
+        if self.message_pass:
+            #########################################################
+            ### predict features via intramonomer message passing ###
+            #########################################################
+            
+            # invariant hidden state lists hA_list, hB_list
+            # each list element is [natomA/B x nembed]
 
 
-        ## directional hidden state lists
-        ## each list element is [natomA/B x 3 x nembed]
-        #hA_dir_list = []
-        #hB_dir_list = []
+            ## directional hidden state lists
+            ## each list element is [natomA/B x 3 x nembed]
+            hA_dir_list = []
+            hB_dir_list = []
 
-        #for i in range(self.n_message):
+            for i in range(self.n_message):
 
-        #    # intramonomer messages (from atom a to a' and from b to b')
-        #    # [intrmonomer_edges x message_size]
-        #    mA_ij = get_messages(hA_list[0], hA_list[-1], rbfA, e_AA_source, e_AA_target)
-        #    mB_ij = get_messages(hB_list[0], hB_list[-1], rbfB, e_BB_source, e_BB_target)
+                # intramonomer messages (from atom a to a' and from b to b')
+                # [intrmonomer_edges x message_size]
+                mA_ij = get_messages(hA_list[0], hA_list[-1], rbfA, e_AA_source, e_AA_target)
+                mB_ij = get_messages(hB_list[0], hB_list[-1], rbfB, e_BB_source, e_BB_target)
 
-        #    #################
-        #    ### invariant ###
-        #    #################
+                #################
+                ### invariant ###
+                #################
 
-        #    # sum each atom's messages
-        #    # [atoms x message_size]
-        #    mA_i = tf.math.unsorted_segment_sum(mA_ij, e_AA_source, natomA)
-        #    mB_i = tf.math.unsorted_segment_sum(mB_ij, e_BB_source, natomB)
+                # sum each atom's messages
+                # [atoms x message_size]
+                mA_i = tf.math.unsorted_segment_sum(mA_ij, e_AA_source, natomA)
+                mB_i = tf.math.unsorted_segment_sum(mB_ij, e_BB_source, natomB)
 
-        #    # get the next hidden state of the atom
-        #    # [atomx x hidden_dim]
-        #    hA_next = self.update_layers[i](mA_i)
-        #    hB_next = self.update_layers[i](mB_i)
+                # get the next hidden state of the atom
+                # [atomx x hidden_dim]
+                hA_next = self.update_layersA[i](mA_i)
+                hB_next = self.update_layersB[i](mB_i)
 
-        #    hA_list.append(hA_next)
-        #    hB_list.append(hB_next)
+                hA_list.append(hA_next)
+                hB_list.append(hB_next)
 
-        #    ###################
-        #    ### directional ###
-        #    ###################
+                ####################
+                #### directional ###
+                ####################
 
-        #    # intromonomer directional messages are regular intramonomer messages, fed through a dense net
-        #    mA_ij_dir = self.directional_layers[i](mA_ij) # [e x 8]
-        #    mB_ij_dir = self.directional_layers[i](mB_ij) # [e x 8]
+                ## intromonomer directional messages are regular intramonomer messages, fed through a dense net
+                mA_ij_dir = self.directional_layersA[i](mA_ij) # [e x 8]
+                mB_ij_dir = self.directional_layersB[i](mB_ij) # [e x 8]
 
-        #    # contract with intramonomer unit vectors to make directional
-        #    mA_ij_dir = tf.einsum('ex,em->exm', dRA_unit, mA_ij_dir) # [e x 3 x 8]
-        #    mB_ij_dir = tf.einsum('ex,em->exm', dRB_unit, mB_ij_dir) # [e x 3 x 8]
+                ## contract with intramonomer unit vectors to make directional
+                mA_ij_dir = tf.einsum('ex,em->exm', dRA_unit, mA_ij_dir) # [e x 3 x 8]
+                mB_ij_dir = tf.einsum('ex,em->exm', dRB_unit, mB_ij_dir) # [e x 3 x 8]
 
-        #    # sum directional messages to get directional atomic hidden states
-        #    # NOTE: this summation must be linear to guarantee equivariance.
-        #    #       because of this constraint, we applied a dense net before the summation, not after
-        #    hA_dir = tf.math.unsorted_segment_sum(mA_ij_dir, e_AA_source, natomA) # [a x 3 x 8]
-        #    hB_dir = tf.math.unsorted_segment_sum(mB_ij_dir, e_BB_source, natomB) # [a x 3 x 8]
+                ## sum directional messages to get directional atomic hidden states
+                ## NOTE: this summation must be linear to guarantee equivariance.
+                ##       because of this constraint, we applied a dense net before the summation, not after
+                hA_dir = tf.math.unsorted_segment_sum(mA_ij_dir, e_AA_source, natomA) # [a x 3 x 8]
+                hB_dir = tf.math.unsorted_segment_sum(mB_ij_dir, e_BB_source, natomB) # [a x 3 x 8]
 
-        #    hA_dir_list.append(hA_dir)
-        #    hB_dir_list.append(hB_dir)
+                hA_dir_list.append(hA_dir)
+                hB_dir_list.append(hB_dir)
 
-        ## concatenate hidden states over MP iterations
-        hA = tf.keras.layers.Flatten()(tf.concat(hA_list, axis=-1))
-        hB = tf.keras.layers.Flatten()(tf.concat(hB_list, axis=-1))
+            ## concatenate hidden states over MP iterations
+            hA = tf.keras.layers.Flatten()(tf.concat(hA_list, axis=-1))
+            hB = tf.keras.layers.Flatten()(tf.concat(hB_list, axis=-1))
 
-        # atom-pair features are a combo of atomic hidden states and the interatomic distance
-        hAB = get_pair(hA, hB, rbf_sr, e_ABsr_source, e_ABsr_target)
-        #hBA = get_pair(hB, hA, rbf_sr, e_ABsr_target, e_ABsr_source)
+            hA_dir = tf.concat(hA_dir_list, axis=-1) # [a x 3 x 8n] with n message-passes
+            hB_dir = tf.concat(hB_dir_list, axis=-1)
+
+            # atom-pair features are a combo of atomic hidden states and the interatomic distance
+            #hAB = get_pair(hA, hB, rbf_sr, e_ABsr_source, e_ABsr_target)
+            #hBA = get_pair(hB, hA, rbf_sr, e_ABsr_target, e_ABsr_source)
+            hAB = get_pair_dir(hA, hB, hA_dir, hB_dir, rbf_sr, e_ABsr_source, e_ABsr_target)
 
 
         ###########################
@@ -324,19 +373,24 @@ class KerasPairModel(tf.keras.Model):
         # since we have a canonical protein-ligand choice for A and B, we can do a single pass
         
         sys_feats = hAB
-        #sys_feats = self.edge_attention(hAB)
+        if self.attention:
+            sys_feats = self.edge_attention(hAB)
+            #sys_feats = tf.reduce_mean(sys_feats, axis=0)
+            sys_feats = tf.expand_dims(sys_feats, axis=0)
+        
+            
         #sys_feats = tf.expand_dims(sys_feats, axis=0)
         #pair_pred = self.pair_readout(pair_pred)
         lig_pred = self.lig_readout(hA)
-        lig_pred = tf.reduce_sum(lig_pred, axis=0) * 0.0001
+        lig_pred = tf.reduce_sum(lig_pred, axis=0) * self.atom_const
         
         if self.mode != "lig":
             pair_pred = self.pair_readout(sys_feats)
-            pair_pred = tf.reduce_sum(pair_pred, axis=0) * 3e-6
+            pair_pred = tf.reduce_sum(pair_pred, axis=0) * self.pair_const
             
             if self.mode == "prot-lig-pair":
                 prot_pred = self.prot_readout(hB)
-                prot_pred = tf.reduce_sum(prot_pred, axis=0) * 0.0001
+                prot_pred = tf.reduce_sum(prot_pred, axis=0) * self.atom_const
  
                 dG_pred = pair_pred - prot_pred - lig_pred + self.shift
                 return dG_pred

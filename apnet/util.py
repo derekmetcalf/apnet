@@ -18,6 +18,7 @@ import qcelemental as qcel
 
 import tensorflow as tf
 
+
 import logging
 tf.get_logger().setLevel(logging.ERROR)
 
@@ -405,7 +406,7 @@ def test_dataset(model_path=None, val_path=None, set_name=None):
 
     return preds, labs
 
-def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=None, mode='lig', val_frac=0.2):
+def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=None, pretrained_atom=False, mode='lig', val_frac=0.2, attention=False, lr=0.002, message_passing=False, dropout=0.2, online_aug=False):
     dim_t, en_t, supp_t, dim_v, en_v, supp_v = load_dataset(set_name=set_name, val_frac=val_frac)
     dock_vars = ["Prime energy", "Docking score", "MMGBSA dG Bind"]
     ext_t = []
@@ -420,9 +421,12 @@ def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=
     print(f'Mean validation label      : {np.mean(en_v)}')
     print(f'Naive validation RMSE      : {np.sqrt(np.mean(np.square(naive_model)))}')
 
-    atom_model = AtomModel().from_file('atom_models/atom_model2')
+    if pretrained_atom:
+        atom_model = AtomModel().from_file('atom_models/atom_model2')
+    else:
+        atom_model = None
     if xfer is not None:
-        pair_model = PairModel(atom_model=atom_model, mode=mode).from_file(xfer_path)
+        pair_model = PairModel(atom_model=atom_model, mode=mode, attention=attention, message_passing=message_passing, dropout=dropout).from_file(xfer_path)
     elif delta_base is not None:
         delta_base_model = PairModel(atom_model=atom_model, mode='lig').from_file(delta_base)
         #base_val_preds = []
@@ -430,17 +434,17 @@ def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=
         #    base_val_preds.append(delta_base_model.model(dim, training=False))
         #base_errs = np.array(base_val_preds) - en_v
         #print(f'Base model validation RMSE : {np.sqrt(np.mean(np.square(base_errs)))}')
-        pair_model = PairModel(atom_model=atom_model, delta_base=delta_base_model, mode=mode)
+        pair_model = PairModel(atom_model=atom_model, delta_base=delta_base_model, mode=mode, attention=attention, message_passing=message_passing, dropout=dropout)
     else:
-        pair_model = PairModel(atom_model=atom_model, mode=mode)
+        pair_model = PairModel(atom_model=atom_model, mode=mode, attention=attention, message_passing=message_passing, dropout=dropout)
     
 
     
     if modelsuffix is not None:
         modelname = f'{set_name}_{mode}_{modelsuffix}'
-        pair_model.train(dim_t, en_t, dim_v, en_v, f'pair_models/{modelname}', n_epochs=epochs, ext_t=ext_t, ext_v=ext_v)
+        pair_model.train(dim_t, en_t, dim_v, en_v, f'pair_models/{modelname}', n_epochs=epochs, ext_t=ext_t, ext_v=ext_v, learning_rate=lr, online_aug=online_aug)
     else:
-        pair_model.train(dim_t, en_t, dim_v, en_v, n_epochs=epochs, ext_t=ext_t, ext_v=ext_v)
+        pair_model.train(dim_t, en_t, dim_v, en_v, n_epochs=epochs, ext_t=ext_t, ext_v=ext_v, learning_rate=lr, online_aug=online_aug)
    
     return pair_model
 
@@ -565,6 +569,7 @@ def load_monomer_dataset(file, max_size=None):
         monomers.append(monomerdata_to_qcel(R[i], Z[i], aQ[i]))
 
     return monomers, cartesian_multipoles, volume_ratios, valence_widths
+
 
 
 if __name__ == "__main__":

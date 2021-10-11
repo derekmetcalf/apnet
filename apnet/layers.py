@@ -119,7 +119,7 @@ class EdgeAttention(layers.Layer):
             weighted_inps = att_coeffs * inputs
             head_coeffs.append(att_coeffs)
             head_outs.append(weighted_inps)
-        outputs = tf.math.reduce_sum(head_outs, axis=1)
+        outputs = tf.math.reduce_sum(head_outs, axis=0)
         outputs = tf.math.reduce_mean(outputs, axis=0)
         outputs = tf.nn.selu(outputs)
         #tf.print(self.weight_vec)
