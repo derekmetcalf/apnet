@@ -19,7 +19,7 @@ parser.add_argument('--pretrained_atom', type=str, default='False', help='Whethe
 parser.add_argument('--lr', type=str, default='5e-4', help='Maximum learning rate (currently fixed 5epoch warmup and cosine decay)')
 parser.add_argument('--message_passing', type=str, default='False', help='Whether to allow message-passing steps while training the model')
 parser.add_argument('--dropout', type=float, default=0.2, help='Fraction of dropout to include on all dense layers')
-parser.add_argument('--online_aug', type=bool, default=False, help='Whether to use online data augmentation (in this case, small Cartesian noise injection)')
+parser.add_argument('--online_aug', type=float, default=0.0, help='Whether to use online data augmentation (in this case, small Cartesian noise injection)')
 
 args = parser.parse_args()
 set_name = args.set
@@ -33,7 +33,7 @@ pretrained_atom = bool(args.pretrained_atom)
 lr = float(args.lr)
 message_passing = bool(args.message_passing)
 dropout = float(args.dropout)
-online_aug = bool(args.online_aug)
+online_aug = float(args.online_aug)
 
 if __name__ == "__main__":
    

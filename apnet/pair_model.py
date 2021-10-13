@@ -19,7 +19,7 @@ from multiprocessing import Pool, get_context
 class PairDataLoader:
     """ todo """
 
-    def __init__(self, dimers, energies, r_cut, r_cut_im, online_aug=False):
+    def __init__(self, dimers, energies, r_cut, r_cut_im, online_aug=0.0):
 
         self.r_cut = r_cut
         self.r_cut_im = r_cut_im
@@ -181,17 +181,17 @@ class PairDataLoader:
 
         offsetA, offsetB = 0, 0
         for i, ind in enumerate(inds): # terrible enumeration variable names
-            if self.online_aug:
-                this_RA = self.RA_list[ind]
-                this_RB = self.RB_list[ind]
+            if self.online_aug > 0.0:
+                this_RA = np.array(self.RA_list[ind])
+                this_RB = np.array(self.RB_list[ind])
                 normal_A = np.random.normal(size=this_RA.shape)
                 normal_B = np.random.normal(size=this_RB.shape)
-                uniform_A = np.random.rand(this_RA.shape[0], this_RA.shape[1])
-                uniform_B = np.random.rand(this_RB.shape[0], this_RB.shape[1])
-                mag_A = np.sqrt(np.reduce_sum(np.square(this_RA, axis=-1)))
-                mag_B = np.sqrt(np.reduce_sum(np.square(this_RB, axis=-1)))
-                inp['RA'].append(this_RA + 0.1 * (uniform_A * normal_A / mag_A))
-                inp['RB'].append(this_RB + 0.1 * (uniform_B * normal_B / mag_B))
+                #uniform_A = np.random.rand(this_RA.shape[0], this_RA.shape[1], this_RA.shape[2])
+                #uniform_B = np.random.rand(this_RB.shape[0], this_RB.shape[1], this_RA.shape[2])
+                mag_A = np.tile(np.expand_dims(np.sqrt(np.sum(np.square(normal_A), axis=-1)), axis=-1), (1,1,3)) 
+                mag_B = np.tile(np.expand_dims(np.sqrt(np.sum(np.square(normal_B), axis=-1)), axis=-1), (1,1,3))
+                inp['RA'].append(this_RA + self.online_aug * (normal_A / mag_A))
+                inp['RB'].append(this_RB + self.online_aug * (normal_B / mag_B))
             else:
                 inp['RA'].append(self.RA_list[ind])
                 inp['RB'].append(self.RB_list[ind])
@@ -342,15 +342,15 @@ class PairModel:
         # todo : better atom_model handling
         self.atom_model = atom_model
         self.delta_base = delta_base
-        message_passing = kwargs.get("message_passing", False)
-        attention = kwargs.get("attention", False)
-        dropout = kwargs.get("dropout", 0.2)
+        self.message_passing = kwargs.get("message_passing", False)
+        self.attention = kwargs.get("attention", False)
+        self.dropout = kwargs.get("dropout", 0.2)
         if delta_base is not None:
-            self.model = KerasDeltaModel(delta_base.model, atom_model.model, mode=mode, message_passing=message_passing, attention=attention, dropout=dropout)
+            self.model = KerasDeltaModel(delta_base.model, atom_model.model, mode=mode, message_passing=self.message_passing, attention=self.attention, dropout=self.dropout)
         elif atom_model is not None:
-            self.model = KerasPairModel(atom_model.model, mode=mode, message_passing=message_passing, attention=attention, dropout=dropout)
+            self.model = KerasPairModel(atom_model.model, mode=mode, message_passing=self.message_passing, attention=self.attention, dropout=self.dropout)
         else:
-            self.model = KerasPairModel(mode=mode, message_passing=message_passing, attention=attention, dropout=dropout)
+            self.model = KerasPairModel(mode=mode, message_passing=self.message_passing, attention=self.attention, dropout=self.dropout)
 
     @classmethod
     def from_file(cls, model_path):
@@ -402,7 +402,7 @@ class PairModel:
         n_rbf = kwargs.get("n_rbf", 8)
         r_cut_im = kwargs.get("r_cut_im", 5.0)
 
-        online_aug = kwargs.get("online_aug", False)        
+        online_aug = kwargs.get("online_aug", 0.0)        
 
         ext_t = kwargs.get("ext_t", [])
         ext_v = kwargs.get("ext_v", [])
@@ -417,12 +417,20 @@ class PairModel:
         # training hyperparameters
         n_epochs = kwargs.get("n_epochs", 15)
         batch_size = kwargs.get("batch_size", 1)
-        learning_rate = kwargs.get("learning_rate", 0.0020)
+        learning_rate = kwargs.get("learning_rate", 0.0001)
+        if self.atom_model is not None:
+            atom_bool = True
+        else:
+            atom_bool = False
 
         print("\nTraining Hyperparameters:", flush=True)
         print(f"  {n_epochs=}", flush=True)
         print(f"  {batch_size=}", flush=True)
         print(f"  {learning_rate=}", flush=True)
+        print(f"  {online_aug=}", flush=True)
+        print(f"  {self.message_passing=}", flush=True)
+        print(f"  {self.dropout=}", flush=True)
+        print(f"  pretrained_atom={atom_bool}", flush=True)
 
         Nt = len(dimers_t)
         Nv = len(dimers_v)
@@ -444,7 +452,7 @@ class PairModel:
 
         print("\nProcessing Dataset...", flush=True)
         time_loaddata_start = time.time()
-        data_loader_t = PairDataLoader(dimers_t, energies_t, 5.0, r_cut_im)
+        data_loader_t = PairDataLoader(dimers_t, energies_t, 5.0, r_cut_im, online_aug=online_aug)
         data_loader_v = PairDataLoader(dimers_v, energies_v, 5.0, r_cut_im)
         dt_loaddata = time.time() - time_loaddata_start
         print(f"...Done in {dt_loaddata:.2f} seconds", flush=True)
@@ -460,11 +468,15 @@ class PairModel:
         energy_v = []
         for inds in inds_t:
             inp_t_chunk = data_loader_t.get_data([inds])
-            preds_t.append(np.sum(test_batch(self.model, inp_t_chunk[0])))
+            pred_t, lig_preds_t, pair_preds_t, sources_t, targets_t = test_batch(self.model, inp_t_chunk[0])
+            preds_t.append(np.sum(pred_t))
+            #preds_t.append(np.sum(test_batch(self.model, inp_t_chunk[0])))
             energy_t.append(inp_t_chunk[1][0])
         for inds in inds_v:
             inp_v_chunk = data_loader_v.get_data([inds])
-            preds_v.append(np.sum(test_batch(self.model, inp_v_chunk[0])))
+            pred_v, lig_preds_v, pair_preds_v, sources_v, targets_v = test_batch(self.model, inp_v_chunk[0])
+            preds_v.append(np.sum(pred_v))
+            #preds_v.append(np.sum(test_batch(self.model, inp_v_chunk[0])))
             energy_v.append(inp_v_chunk[1][0])
 
         #preds_t = np.concatenate([test_batch(self.model, inp_t_i[0]) for inp_t_i in inp_t_chunks], axis=0)
@@ -491,7 +503,7 @@ class PairModel:
 
         #learning_rate_scheduler = keras.optimizers.schedules.ExponentialDecay(initial_learning_rate=learning_rate, decay_steps=(num_batches * 60), decay_rate=0.5, staircase=True)
         #learning_rate_scheduler = tf.keras.optimizers.schedules.CosineDecayRestarts(initial_learning_rate=learning_rate, first_decay_steps=(num_batches * 75), t_mul=2.0, m_mul=1.0)
-        warmup_epoch = 5
+        warmup_epoch = 1
         warmup_steps = int(warmup_epoch * num_batches)
         total_steps = n_epochs * num_batches
         learning_rate_sched = WarmUpCosineDecayScheduler(learning_rate_base=learning_rate,
@@ -501,7 +513,7 @@ class PairModel:
                                                                    hold_base_rate_steps=0)
         #scheduler = learning_rate_sched.scheduler
         #callback = tf.keras.callbacks.LearningRateScheduler(learning_rate_sched)
-        optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate_sched)
+        optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate_sched, clipnorm=0.05)
 
         loss_fn = tf.keras.losses.MSE
 
@@ -520,7 +532,7 @@ class PairModel:
                 #tf.print(inp_batch)
                 #tf.print(f"pre-pred lab :{ie_batch}")
 
-                preds_batch = train_batch(self.model, optimizer, loss_fn, inp_batch, ie_batch)
+                preds_batch, _, _, _, _ = train_batch(self.model, optimizer, loss_fn, inp_batch, ie_batch)
                 #tf.print(f"preds: {preds_batch.numpy()}")
                 #preds_batch = tf.reshape(preds_batch, [-1, 4])
 
@@ -540,7 +552,9 @@ class PairModel:
             preds_v = []
             for inds in inds_v:
                 inp_v_chunk = data_loader_v.get_data([inds])
-                preds_v.append(np.sum(test_batch(self.model, inp_v_chunk[0])))
+                pred_v, lig_preds_v, pair_preds_v, sources_v, targets_v = test_batch(self.model, inp_v_chunk[0])
+                preds_v.append(np.sum(pred_v))
+                #preds_v.append(np.sum(test_batch(self.model, inp_v_chunk[0])))
             #preds_v = np.array([np.sum(test_batch(self.model, inp_v_i[0])) for inp_v_i in inp_v_chunks])
             mae_v = np.average(np.average(np.abs(np.array(preds_v) - energy_v), axis=0))
             rmse_v = np.sqrt(np.average(np.square(np.array(preds_v) - energy_v), axis=0))
@@ -589,11 +603,17 @@ class PairModel:
         print("\nPredicting Interaction Energies...", flush=True)
         time_predenergy_start = time.time()
         inp_chunks = data_loader.get_data(inds)
-        preds = np.concatenate([test_batch(self.model, [inp_i]) for inp_i in inp_chunks], axis=0)
+        outs = [test_batch(self.model, [inp_i]) for inp_i in inp_chunks]
+        preds = np.concatenate([outs[i][0] for i in range(len(outs))], axis=0)
+        lig_preds = np.concatenate([outs[i][1] for i in range(len(outs))], axis=0)
+        pair_preds = np.concatenate([outs[i][2] for i in range(len(outs))], axis=0)
+        sources = np.concatenate([outs[i][3] for i in range(len(outs))], axis=0)
+        targets = np.concatenate([outs[i][4] for i in range(len(outs))], axis=0)
+        #preds = np.concatenate([test_batch(self.model, [inp_i]) for inp_i in inp_chunks], axis=0)
         dt_predenergy = time.time() - time_predenergy_start
         print(f"Done in {dt_predenergy:.2f} seconds", flush=True)
 
-        return np.array(preds)
+        return np.array(preds), lig_preds, pair_preds, sources, targets
 
     # Possible TODO: predict_elst, transfer_learning, gradient
 
@@ -734,8 +754,8 @@ def train_batch(model, optimizer, loss_fn, inp, ie):
 
     with tf.GradientTape() as tape:
 
-        preds = model(inp, training=True)
-        preds = tf.reduce_sum(preds)
+        outs = model(inp, training=True)
+        preds = tf.reduce_sum(outs[0])
         #tf.print(preds)
         #tf.print(ie)
 
@@ -743,15 +763,16 @@ def train_batch(model, optimizer, loss_fn, inp, ie):
 
     grads = tape.gradient(loss_value, model.trainable_weights)
     optimizer.apply_gradients(zip(grads, model.trainable_weights))
-    return preds
+    return preds, outs[1], outs[2], outs[3], outs[4]
 
 @tf.function(experimental_relax_shapes=True)
 def test_batch(model, inp):
 
-    preds  = model(inp, training=False)
+    outs  = model(inp, training=False)
+    preds = outs[0]
     #preds = tf.reshape(preds, [-1, 4])
 
-    return preds
+    return preds, outs[1], outs[2], outs[3], outs[4]
 
 
 

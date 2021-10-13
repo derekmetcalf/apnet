@@ -57,19 +57,21 @@ def normalize(tensor, axis=0):
 def get_pair_dir(hA, hB, hA_dir, hB_dir, rbf, e_source, e_target):
     feat_consts = 1.e-6
 
-    hA_source = normalize(tf.gather(hA, e_source)) # [p, f]
-    hB_target = normalize(tf.gather(hB, e_target)) # [p, f]
-    hA_dir_source = normalize(tf.gather(hA_dir, e_source)) # [p, 3, f]
-    hB_dir_target = normalize(tf.gather(hB_dir, e_target)) # [p, 3, f]
+    hA_source = tf.gather(hA, e_source) # [p, f]
+    hB_target = tf.gather(hB, e_target) # [p, f]
+    hA_dir_source = tf.gather(hA_dir, e_source) # [p, 3, f]
+    hB_dir_target = tf.gather(hB_dir, e_target) # [p, 3, f]
     hAB_dir_dot = tf.einsum('pxf,pxf->pf', hA_dir_source, hB_dir_target) # [p, f]
     hA_dir_mag = tf.math.sqrt(tf.einsum('pxf,pxf->pf', hA_dir_source, hA_dir_source)) # [p, f]
     hB_dir_mag = tf.math.sqrt(tf.einsum('pxf,pxf->pf', hB_dir_target, hB_dir_target)) # [p, f]
-    hAB_dir_cosangle = normalize(hAB_dir_dot / (hA_dir_mag * hB_dir_mag + 1e-2)) # [p, f]
+    hAB_dir_cosangle = normalize(hAB_dir_dot / (hA_dir_mag * hB_dir_mag + 1e-6)) # [p, f]
+    normed_hA_source = normalize(hA_source)
+    normed_hB_target = normalize(hB_target)
     normed_dir_dot = normalize(hAB_dir_dot)
     normed_magA = normalize(hA_dir_mag)
     normed_magB = normalize(hB_dir_mag)
 
-    return tf.concat([hA_source*feat_consts, hB_target*feat_consts, rbf*feat_consts, hA_dir_mag*feat_consts, hB_dir_mag*feat_consts, hAB_dir_dot*feat_consts, hAB_dir_cosangle*feat_consts], axis=-1)
+    return tf.concat([normed_hA_source*feat_consts, normed_hB_target*feat_consts, rbf, normed_magA*feat_consts, normed_magB*feat_consts, normed_dir_dot*feat_consts, hAB_dir_cosangle*feat_consts], axis=-1)
 
 def get_pair(hA, hB, rbf, e_source, e_target):
 
@@ -81,7 +83,7 @@ def get_pair(hA, hB, rbf, e_source, e_target):
 
 class KerasPairModel(tf.keras.Model):
 
-    def __init__(self, atom_model=None, n_message=3, n_rbf=8, n_neuron=128, n_embed=8, r_cut_im=8.0, scale_init=-1.e-8, shift_init=7.808, mode='lig-pair', attention=False, **kwargs):
+    def __init__(self, atom_model=None, n_message=3, n_rbf=8, n_neuron=128, n_embed=8, r_cut_im=8.0, scale_init=-1.e-8, shift_init=7.808, mode='lig-pair', **kwargs):
         super(KerasPairModel, self).__init__()
 
         # pre-trained atomic model for predicting atomic properties
@@ -96,7 +98,7 @@ class KerasPairModel(tf.keras.Model):
         self.n_embed = n_embed
         self.r_cut_im = r_cut_im
         self.mode = mode
-        self.attention = attention
+        self.attention = kwargs.get("attention", False)
         self.message_pass = kwargs.get("message_passing", False)
         self.dropout = kwargs.get("dropout", 0.2)
         #self.r_cut = 5.0
@@ -106,6 +108,9 @@ class KerasPairModel(tf.keras.Model):
 
         # embed atom types
         self.embed_layer = tf.keras.layers.Embedding(max_Z+1, n_embed)
+
+        # embed pair layer if too large
+        self.embed_pair = FeedForwardLayer([n_neuron, n_embed], ["selu", "linear"], f'pair_embed')
 
         self.scale = tf.Variable(scale_init)
         self.shift = tf.Variable(shift_init)
@@ -125,15 +130,15 @@ class KerasPairModel(tf.keras.Model):
         self.prot_readout = FeedForwardLayer(layer_nodes_readout, layer_activations, f'prot_readout', dropout=self.dropout)
 
         #self.atom_const = tf.Variable(1e-4)
-        self.atom_const = tf.Variable(1e-6)
+        self.atom_const = tf.Variable(1e-5)
 
         # if desired, do a simple edge attention layer over the edges
-        if self.attention:
-            self.edge_dim = 4 * (1 + self.n_message) * n_embed + n_rbf + 4 * self.n_message * n_embed 
-            self.edge_attention = EdgeAttention(5, self.edge_dim, 'edge_attention', self.scale) 
-            self.pair_const = tf.Variable(1.)
-        else:
-            self.pair_const = tf.Variable(3e-10)
+        #if self.attention:
+        #    self.edge_dim = 4 * (1 + self.n_message) * n_embed + n_rbf + 3 * self.n_message * n_embed 
+        #    self.edge_attention = EdgeAttention(5, self.edge_dim, 'edge_attention', self.scale) 
+        #    self.pair_const = tf.Variable(1.)
+        #else:
+        self.pair_const = tf.Variable(1e-4)
 
         # embed distances into large orthogonal basis
         self.distance_layer = DistanceLayer(n_rbf, 5.0)
@@ -362,6 +367,7 @@ class KerasPairModel(tf.keras.Model):
             #hAB = get_pair(hA, hB, rbf_sr, e_ABsr_source, e_ABsr_target)
             #hBA = get_pair(hB, hA, rbf_sr, e_ABsr_target, e_ABsr_source)
             hAB = get_pair_dir(hA, hB, hA_dir, hB_dir, rbf_sr, e_ABsr_source, e_ABsr_target)
+            #hAB = self.embed_pair(hAB)
 
 
         ###########################
@@ -373,33 +379,31 @@ class KerasPairModel(tf.keras.Model):
         # since we have a canonical protein-ligand choice for A and B, we can do a single pass
         
         sys_feats = hAB
-        if self.attention:
-            sys_feats = self.edge_attention(hAB)
-            #sys_feats = tf.reduce_mean(sys_feats, axis=0)
-            sys_feats = tf.expand_dims(sys_feats, axis=0)
+        #if self.attention:
+        #    sys_feats = self.edge_attention(hAB)
+        #    #sys_feats = tf.reduce_mean(sys_feats, axis=0)
+        #    sys_feats = tf.expand_dims(sys_feats, axis=0)
         
             
         #sys_feats = tf.expand_dims(sys_feats, axis=0)
         #pair_pred = self.pair_readout(pair_pred)
-        lig_pred = self.lig_readout(hA)
-        lig_pred = tf.reduce_sum(lig_pred, axis=0) * self.atom_const
+        all_lig_pred = self.lig_readout(hA)
+        lig_pred = tf.reduce_sum(all_lig_pred, axis=0) * self.atom_const
         
         if self.mode != "lig":
-            pair_pred = self.pair_readout(sys_feats)
-            pair_pred = tf.reduce_sum(pair_pred, axis=0) * self.pair_const
+            all_pair_pred = self.pair_readout(sys_feats)
+            pair_pred = tf.reduce_sum(all_pair_pred, axis=0) * self.pair_const
             
             if self.mode == "prot-lig-pair":
                 prot_pred = self.prot_readout(hB)
                 prot_pred = tf.reduce_sum(prot_pred, axis=0) * self.atom_const
  
                 dG_pred = pair_pred - prot_pred - lig_pred + self.shift
-                return dG_pred
             else:
                 dG_pred = pair_pred - lig_pred + self.shift
-                return dG_pred
         else:
             dG_pred = lig_pred + self.shift
-            return dG_pred
+        return dG_pred, all_lig_pred, all_pair_pred, e_ABsr_source, e_ABsr_target
 
 
     def get_config(self):

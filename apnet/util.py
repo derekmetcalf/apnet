@@ -355,8 +355,31 @@ def load_dataset(train_path=None, val_path=None, set_name=None, val_frac=0.1):
         trainval_warn(val_frac)
         dim_t, en_t = load_dG_dataset('data/sets/505_train/dimers.pkl', poses=1)
         dim_v, en_v = load_dG_dataset('data/sets/505_val/dimers.pkl', poses=1)
+
+    elif set_name in ['pdbbind-0', 'pdbbind-1', 'pdbbind-2', 'pdbbind-3', 'pdbbind-4']:
+        val_fold = int(set_name[-1])
+        train_folds = [0, 1, 2, 3, 4]
+        train_folds.remove(val_fold)
+        dim_v, en_v, supp_v = load_dG_dataset(f'data/pdbbind-xval/fold{val_fold}.pkl')
+        dims_t = []
+        ens_t = []
+        supps_t = []
+        for i, fold in enumerate(train_folds):
+            dim, en, supp = load_dG_dataset(f'data/pdbbind-xval/fold{fold}.pkl')
+            dims_t.extend(dim)
+            ens_t.extend(en)
+            supps_t.extend(supp)
+        #print(dims_t)
+        #print(ens_t)
+        #print(supps_t)
+        #exit()
+        dim_t = dims_t
+        en_t = ens_t
+        supp_t = supps_t
+        #dim_t = pd.concat(dims_t)
+        #en_t = np.concat(ens_t)
     elif set_name in binding_db_sets:
-        np.random.seed(4201)
+        np.random.seed(4202)
         if set_name == "pdbbind-general":
             dim, en = load_dG_dataset(f'data/PDBbind-general-v2020/dimers.pkl', poses=1)
         else:
@@ -385,7 +408,7 @@ def load_dataset(train_path=None, val_path=None, set_name=None, val_frac=0.1):
 
 def test_dataset(model_path=None, val_path=None, set_name=None):
     dim_t, en_t, supp_t, dim_v, en_v, supp_v = load_dataset(val_path=val_path, set_name=set_name)
-    atom_model = AtomModel().from_file('atom_models/atom_model2')
+    #atom_model = AtomModel().from_file('atom_models/atom_model2')
     pair_model = PairModel().from_file(model_path)
     print("\nProcessing Dataset...", flush=True)
     time_loaddata_start = time.time()
@@ -406,7 +429,7 @@ def test_dataset(model_path=None, val_path=None, set_name=None):
 
     return preds, labs
 
-def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=None, pretrained_atom=False, mode='lig', val_frac=0.2, attention=False, lr=0.002, message_passing=False, dropout=0.2, online_aug=False):
+def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=None, pretrained_atom=False, mode='lig', val_frac=0.2, attention=False, lr=0.0001, message_passing=False, dropout=0.2, online_aug=False):
     dim_t, en_t, supp_t, dim_v, en_v, supp_v = load_dataset(set_name=set_name, val_frac=val_frac)
     dock_vars = ["Prime energy", "Docking score", "MMGBSA dG Bind"]
     ext_t = []
@@ -420,6 +443,7 @@ def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=
     print(f'Mean training label        : {np.mean(en_t)}')
     print(f'Mean validation label      : {np.mean(en_v)}')
     print(f'Naive validation RMSE      : {np.sqrt(np.mean(np.square(naive_model)))}')
+
 
     if pretrained_atom:
         atom_model = AtomModel().from_file('atom_models/atom_model2')
@@ -442,7 +466,7 @@ def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=
     
     if modelsuffix is not None:
         modelname = f'{set_name}_{mode}_{modelsuffix}'
-        pair_model.train(dim_t, en_t, dim_v, en_v, f'pair_models/{modelname}', n_epochs=epochs, ext_t=ext_t, ext_v=ext_v, learning_rate=lr, online_aug=online_aug)
+        pair_model.train(dim_t, en_t, dim_v, en_v, f'pair_models/{modelname}', n_epochs=epochs, ext_t=ext_t, ext_v=ext_v, learning_rate=lr, online_aug=online_aug, log_path=f'pair_models/{modelname}.log')
     else:
         pair_model.train(dim_t, en_t, dim_v, en_v, n_epochs=epochs, ext_t=ext_t, ext_v=ext_v, learning_rate=lr, online_aug=online_aug)
    
