@@ -571,6 +571,8 @@ class PairModel:
             if loss_v < loss_v_best:
                 if model_path is not None:
                     self.model.save(model_path)
+                    np.save(f'{model_path}_bestval_preds.npy', np.array(preds_v))
+                    np.save(f'{model_path}_bestval_labs.npy', np.array(energy_v))
                 loss_v_best = loss_v
                 #total_loss_v_best = total_loss_v
                 improved = "*"
