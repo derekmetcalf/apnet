@@ -381,7 +381,7 @@ class PairModel:
                 raise Exception(f"{model_path=} already exists. Delete existing model or choose a new `model_path`")
         
         
-        self.model.shift = np.mean(energies_t)
+        #self.model.shift = np.mean(energies_t)
         #self.model.scale = 0.0001
 
         if self.delta_base is not None:

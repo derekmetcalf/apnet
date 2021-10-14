@@ -378,6 +378,7 @@ def load_dataset(train_path=None, val_path=None, set_name=None, val_frac=0.1):
         supp_t = supps_t
         #dim_t = pd.concat(dims_t)
         #en_t = np.concat(ens_t)
+
     elif set_name in binding_db_sets:
         np.random.seed(4202)
         if set_name == "pdbbind-general":
@@ -407,7 +408,7 @@ def load_dataset(train_path=None, val_path=None, set_name=None, val_frac=0.1):
     return dim_t, en_t, None, dim_v, en_v, None
 
 def test_dataset(model_path=None, val_path=None, set_name=None):
-    dim_t, en_t, supp_t, dim_v, en_v, supp_v = load_dataset(val_path=val_path, set_name=set_name)
+    dim_t, en_t, supp_t, dim_v, en_v, supp_v = load_dataset(set_name=set_name)
     #atom_model = AtomModel().from_file('atom_models/atom_model2')
     pair_model = PairModel().from_file(model_path)
     print("\nProcessing Dataset...", flush=True)
@@ -419,15 +420,28 @@ def test_dataset(model_path=None, val_path=None, set_name=None):
     dt_loaddata = time.time() - time_loaddata_start
     print(f"...Done in {dt_loaddata:.2f} seconds", flush=True)
     preds_v = []
+    lig_pred_v = []
+    pair_pred_v = []
+    source_v = []
+    target_v = []
     energy_v = en_v
     for inds in inds_v:
         inp_v_chunk = data_loader_v.get_data([inds])
-        preds_v.append(pair_model.model(inp_v_chunk[0]))
- 
+        outs_v = pair_model.model(inp_v_chunk[0])
+        preds_v.append(outs_v[0])
+        lig_pred_v.append(outs_v[1])
+        pair_pred_v.append(outs_v[2])
+        source_v.append(outs_v[3])
+        target_v.append(outs_v[4])
+
     preds = np.array(preds_v)
     labs = np.array(energy_v)
+    lig_preds = np.array(lig_pred_v)
+    pair_preds = np.array(pair_pred_v)
+    sources = np.array(source_v)
+    targets = np.array(target_v)
 
-    return preds, labs
+    return preds, labs, lig_preds, pair_preds, sources, targets
 
 def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=None, pretrained_atom=False, mode='lig', val_frac=0.2, attention=False, lr=0.0001, message_passing=False, dropout=0.2, online_aug=False):
     dim_t, en_t, supp_t, dim_v, en_v, supp_v = load_dataset(set_name=set_name, val_frac=val_frac)
@@ -444,6 +458,8 @@ def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=
     print(f'Mean validation label      : {np.mean(en_v)}')
     print(f'Naive validation RMSE      : {np.sqrt(np.mean(np.square(naive_model)))}')
 
+    print(message_passing)
+    print(attention)
 
     if pretrained_atom:
         atom_model = AtomModel().from_file('atom_models/atom_model2')

@@ -14,10 +14,17 @@ parser.add_argument('--suffix', type=str, default='', help='Saved model name suf
 parser.add_argument('--delta_path',  default=None, help='Location of base model from which to delta learn (WIP)')
 parser.add_argument('--xfer_path', default=None, help='Location of base model from which to transfer learn (WIP)')
 parser.add_argument('--epochs', type=str, default='1000', help='Number of epochs to train for')
-parser.add_argument('--attention', type=str, default='False', help='Whether to use attention mechanism during readout')
+parser.add_argument('--att', dest='att', action='store_true', help='Train with atom-pair attention mechanism')
+parser.add_argument('--no-att', dest='att', action='store_false', help='Train without attention mechanism')
+parser.set_defaults(att=False)
 parser.add_argument('--pretrained_atom', type=str, default='False', help='Whether to use pre-trained atomic featurization from existing model')
+parser.add_argument('--pretrained-atom', dest='pretrained_atom', action='store_true', help='Train with pre-trained atomic features')
+parser.add_argument('--no-pretrained-atom', dest='pretrained_atom', action='store_false', help='Train without pre-trained atomic features')
+parser.set_defaults(pretrained_atom=False)
 parser.add_argument('--lr', type=str, default='5e-4', help='Maximum learning rate (currently fixed 5epoch warmup and cosine decay)')
-parser.add_argument('--message_passing', type=str, default='False', help='Whether to allow message-passing steps while training the model')
+parser.add_argument('--mp', dest='mp', action='store_true', help='Allow message-passing steps while training the model')
+parser.add_argument('--no-mp', dest='mp', action='store_false', help='Disallow message-passing steps while training the model')
+parser.set_defaults(mp=False)
 parser.add_argument('--dropout', type=float, default=0.2, help='Fraction of dropout to include on all dense layers')
 parser.add_argument('--online_aug', type=float, default=0.0, help='Whether to use online data augmentation (in this case, small Cartesian noise injection)')
 
@@ -28,10 +35,10 @@ suffix = args.suffix
 delta_path = args.delta_path
 xfer_path = args.xfer_path
 n_epochs = int(args.epochs)
-attention = bool(args.attention)
-pretrained_atom = bool(args.pretrained_atom)
+attention = args.att
+pretrained_atom = args.pretrained_atom
 lr = float(args.lr)
-message_passing = bool(args.message_passing)
+message_passing = args.mp
 dropout = float(args.dropout)
 online_aug = float(args.online_aug)
 
