@@ -432,6 +432,8 @@ class PairModel:
         print(f"  {self.message_passing=}", flush=True)
         print(f"  {self.dropout=}", flush=True)
         print(f"  pretrained_atom={atom_bool}", flush=True)
+        print(f"  {self.pair_scale_init=}", flush=True)
+        print(f"  {self.attention=}", flush=True)
 
         Nt = len(dimers_t)
         Nv = len(dimers_v)
