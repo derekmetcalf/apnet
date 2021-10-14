@@ -71,7 +71,7 @@ def get_pair_dir(hA, hB, hA_dir, hB_dir, rbf, e_source, e_target):
     normed_magA = normalize(hA_dir_mag)
     normed_magB = normalize(hB_dir_mag)
 
-    return tf.concat([normed_hA_source*feat_consts, normed_hB_target*feat_consts, rbf, normed_magA*feat_consts, normed_magB*feat_consts, normed_dir_dot*feat_consts, hAB_dir_cosangle*feat_consts], axis=-1)
+    return tf.concat([normed_hA_source, normed_hB_target, rbf, normed_magA, normed_magB, normed_dir_dot, hAB_dir_cosangle], axis=-1)
 
 def get_pair(hA, hB, rbf, e_source, e_target):
 
