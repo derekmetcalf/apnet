@@ -458,9 +458,6 @@ def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=
     print(f'Mean validation label      : {np.mean(en_v)}')
     print(f'Naive validation RMSE      : {np.sqrt(np.mean(np.square(naive_model)))}')
 
-    print(message_passing)
-    print(attention)
-
     if pretrained_atom:
         atom_model = AtomModel().from_file('atom_models/atom_model2')
     else:

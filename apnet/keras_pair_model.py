@@ -133,12 +133,12 @@ class KerasPairModel(tf.keras.Model):
         self.atom_const = tf.Variable(1e-5)
 
         # if desired, do a simple edge attention layer over the edges
-        #if self.attention:
-        #    self.edge_dim = 4 * (1 + self.n_message) * n_embed + n_rbf + 3 * self.n_message * n_embed 
-        #    self.edge_attention = EdgeAttention(5, self.edge_dim, 'edge_attention', self.scale) 
-        #    self.pair_const = tf.Variable(1.)
-        #else:
-        self.pair_const = tf.Variable(1e-4)
+        if self.attention:
+            self.edge_dim = 4 * (1 + self.n_message) * n_embed + n_rbf + 4 * self.n_message * n_embed 
+            self.edge_attention = EdgeAttention(5, self.edge_dim, 'edge_attention', self.scale) 
+            self.pair_const = tf.Variable(1e-1)
+        else:
+            self.pair_const = tf.Variable(1e-4)
 
         # embed distances into large orthogonal basis
         self.distance_layer = DistanceLayer(n_rbf, 5.0)
@@ -379,10 +379,10 @@ class KerasPairModel(tf.keras.Model):
         # since we have a canonical protein-ligand choice for A and B, we can do a single pass
         
         sys_feats = hAB
-        #if self.attention:
-        #    sys_feats = self.edge_attention(hAB)
-        #    #sys_feats = tf.reduce_mean(sys_feats, axis=0)
-        #    sys_feats = tf.expand_dims(sys_feats, axis=0)
+        if self.attention:
+            sys_feats = self.edge_attention(hAB)
+            #sys_feats = tf.reduce_mean(sys_feats, axis=0)
+            sys_feats = tf.expand_dims(sys_feats, axis=0)
         
             
         #sys_feats = tf.expand_dims(sys_feats, axis=0)
@@ -403,6 +403,7 @@ class KerasPairModel(tf.keras.Model):
                 dG_pred = pair_pred - lig_pred + self.shift
         else:
             dG_pred = lig_pred + self.shift
+            all_pair_pred = tf.zeros_like(e_ABsr_source, dtype=tf.float32)
         return dG_pred, all_lig_pred, all_pair_pred, e_ABsr_source, e_ABsr_target
 
 
