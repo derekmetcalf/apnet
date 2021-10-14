@@ -345,10 +345,11 @@ class PairModel:
         self.message_passing = kwargs.get("message_passing", False)
         self.attention = kwargs.get("attention", False)
         self.dropout = kwargs.get("dropout", 0.2)
+        self.pair_scale_init = kwargs.get("pair_scale_init", 5e-5)
         if delta_base is not None:
             self.model = KerasDeltaModel(delta_base.model, atom_model.model, mode=mode, message_passing=self.message_passing, attention=self.attention, dropout=self.dropout)
         elif atom_model is not None:
-            self.model = KerasPairModel(atom_model.model, mode=mode, message_passing=self.message_passing, attention=self.attention, dropout=self.dropout)
+            self.model = KerasPairModel(atom_model.model, mode=mode, message_passing=self.message_passing, attention=self.attention, dropout=self.dropout, pair_scale_init=self.pair_scale_init)
         else:
             self.model = KerasPairModel(mode=mode, message_passing=self.message_passing, attention=self.attention, dropout=self.dropout)
 

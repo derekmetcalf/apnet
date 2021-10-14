@@ -27,6 +27,7 @@ parser.add_argument('--no-mp', dest='mp', action='store_false', help='Disallow m
 parser.set_defaults(mp=False)
 parser.add_argument('--dropout', type=float, default=0.2, help='Fraction of dropout to include on all dense layers')
 parser.add_argument('--online_aug', type=float, default=0.0, help='Whether to use online data augmentation (in this case, small Cartesian noise injection)')
+parser.add_argument('--pair_scale_init', type=float, default=5.e-5, help='Pair energy scaler initialization (trainable)')
 
 args = parser.parse_args()
 set_name = args.set
@@ -41,6 +42,7 @@ lr = float(args.lr)
 message_passing = args.mp
 dropout = float(args.dropout)
 online_aug = float(args.online_aug)
+pair_scale_init = float(args.pair_scale_init)
 
 if __name__ == "__main__":
    
@@ -70,5 +72,6 @@ if __name__ == "__main__":
                             lr=lr,
                             message_passing=message_passing,
                             dropout=dropout,
-                            online_aug=online_aug)
+                            online_aug=online_aug,
+                            pair_scale_init=pair_scale_init)
     #apnet.util.train_crossval(set_name, suffix, n_epochs, delta_base=delta_path, xfer=xfer_path, mode=mode, val_frac=0.1, folds=5)

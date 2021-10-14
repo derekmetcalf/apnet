@@ -101,6 +101,7 @@ class KerasPairModel(tf.keras.Model):
         self.attention = kwargs.get("attention", False)
         self.message_pass = kwargs.get("message_passing", False)
         self.dropout = kwargs.get("dropout", 0.2)
+        self.pair_scale_init = kwargs.get("pair_scale_init", 5e-5)
         #self.r_cut = 5.0
 
         # embed interatomic distances into large orthogonal basis
@@ -138,7 +139,7 @@ class KerasPairModel(tf.keras.Model):
             self.edge_attention = EdgeAttention(5, self.edge_dim, 'edge_attention', self.scale) 
             self.pair_const = tf.Variable(1e-1)
         else:
-            self.pair_const = tf.Variable(1e-4)
+            self.pair_const = tf.Variable(self.pair_scale_init)
 
         # embed distances into large orthogonal basis
         self.distance_layer = DistanceLayer(n_rbf, 5.0)

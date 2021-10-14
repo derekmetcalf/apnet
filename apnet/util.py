@@ -443,7 +443,7 @@ def test_dataset(model_path=None, val_path=None, set_name=None):
 
     return preds, labs, lig_preds, pair_preds, sources, targets
 
-def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=None, pretrained_atom=False, mode='lig', val_frac=0.2, attention=False, lr=0.0001, message_passing=False, dropout=0.2, online_aug=False):
+def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=None, pretrained_atom=False, mode='lig', val_frac=0.2, attention=False, lr=0.0001, message_passing=False, dropout=0.2, online_aug=False, pair_scale_init=5e-5):
     dim_t, en_t, supp_t, dim_v, en_v, supp_v = load_dataset(set_name=set_name, val_frac=val_frac)
     dock_vars = ["Prime energy", "Docking score", "MMGBSA dG Bind"]
     ext_t = []
@@ -463,7 +463,7 @@ def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=
     else:
         atom_model = None
     if xfer is not None:
-        pair_model = PairModel(atom_model=atom_model, mode=mode, attention=attention, message_passing=message_passing, dropout=dropout).from_file(xfer_path)
+        pair_model = PairModel(atom_model=atom_model, mode=mode, attention=attention, message_passing=message_passing, dropout=dropout, pair_scale_init=pair_scale_init).from_file(xfer_path)
     elif delta_base is not None:
         delta_base_model = PairModel(atom_model=atom_model, mode='lig').from_file(delta_base)
         #base_val_preds = []
@@ -471,9 +471,9 @@ def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=
         #    base_val_preds.append(delta_base_model.model(dim, training=False))
         #base_errs = np.array(base_val_preds) - en_v
         #print(f'Base model validation RMSE : {np.sqrt(np.mean(np.square(base_errs)))}')
-        pair_model = PairModel(atom_model=atom_model, delta_base=delta_base_model, mode=mode, attention=attention, message_passing=message_passing, dropout=dropout)
+        pair_model = PairModel(atom_model=atom_model, delta_base=delta_base_model, mode=mode, attention=attention, message_passing=message_passing, dropout=dropout, pair_scale_init=pair_scale_init)
     else:
-        pair_model = PairModel(atom_model=atom_model, mode=mode, attention=attention, message_passing=message_passing, dropout=dropout)
+        pair_model = PairModel(atom_model=atom_model, mode=mode, attention=attention, message_passing=message_passing, dropout=dropout, pair_scale_init=pair_scale_init)
     
 
     
