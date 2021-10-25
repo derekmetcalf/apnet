@@ -12,7 +12,7 @@ from tensorflow import keras
 from tensorflow.keras import backend as K
 #tf.config.run_functions_eagerly(True) #eager tf is dummy slow
 
-from apnet.keras_pair_model import KerasPairModel, KerasDeltaModel
+from apnet.keras_pair_model import KerasPairModel
 from apnet import constants
 from multiprocessing import Pool, get_context
 
@@ -346,12 +346,12 @@ class PairModel:
         self.attention = kwargs.get("attention", False)
         self.dropout = kwargs.get("dropout", 0.2)
         self.pair_scale_init = kwargs.get("pair_scale_init", 5e-5)
-        if delta_base is not None:
-            self.model = KerasDeltaModel(delta_base.model, atom_model.model, mode=mode, message_passing=self.message_passing, attention=self.attention, dropout=self.dropout)
-        elif atom_model is not None:
-            self.model = KerasPairModel(atom_model.model, mode=mode, message_passing=self.message_passing, attention=self.attention, dropout=self.dropout, pair_scale_init=self.pair_scale_init)
+        #if delta_base is not None:
+        #    self.model = KerasDeltaModel(delta_base.model, atom_model.model, mode=mode, message_passing=self.message_passing, attention=self.attention, dropout=self.dropout, pair_scale_init=self.pair_scale_init)
+        if atom_model is not None:
+            self.model = KerasPairModel(atom_model.model, mode=mode, message_passing=self.message_passing, attention=self.attention, dropout=self.dropout, pair_scale_init=self.pair_scale_init, delta_model=self.delta_base)
         else:
-            self.model = KerasPairModel(mode=mode, message_passing=self.message_passing, attention=self.attention, dropout=self.dropout)
+            self.model = KerasPairModel(mode=mode, message_passing=self.message_passing, attention=self.attention, dropout=self.dropout, delta_model=self.delta_base)
 
     @classmethod
     def from_file(cls, model_path):

@@ -463,9 +463,10 @@ def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=
     else:
         atom_model = None
     if xfer is not None:
-        pair_model = PairModel(atom_model=atom_model, mode=mode, attention=attention, message_passing=message_passing, dropout=dropout, pair_scale_init=pair_scale_init).from_file(xfer_path)
+        pair_model = PairModel(atom_model=atom_model, mode=mode, attention=attention, message_passing=message_passing, dropout=dropout, pair_scale_init=pair_scale_init).from_file(xfer)
     elif delta_base is not None:
-        delta_base_model = PairModel(atom_model=atom_model, mode='lig').from_file(delta_base)
+        delta_base_model = PairModel(atom_model=atom_model, mode='lig-pair').from_file(delta_base).model
+        delta_base_model.trainable = False
         #base_val_preds = []
         #for dim in dim_v:
         #    base_val_preds.append(delta_base_model.model(dim, training=False))
