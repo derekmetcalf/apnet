@@ -330,6 +330,18 @@ def trainval_warn(val_frac):
 
 def load_dataset(train_path=None, val_path=None, set_name=None, val_frac=0.1):
     binding_db_sets = ["295", "35", "pdbbind-general"]
+    curve_names = []
+    if "4MXO" in set_name:
+        dat = set_name.split('-')
+        this_perc = int(dat[1])
+        val_fold = int(dat[-1][-1])
+        curve_names.append(f'data/4MXO_curve_expt/rand_data{str(this_perc)}p/fold{val_fold}.pkl')
+        curve_percs = [10, 20, 40, 60, 80, 100]
+        curve_folds = [0, 1, 2, 3, 4]
+        for perc in curve_percs:
+            for fold in curve_folds:
+                curve_strs = f'data/4MXO_curve_expt/rand_data{str(perc)}p/fold{fold}.pkl' 
+
     dim_t = None
     en_t = None
     dim_v = None
@@ -378,7 +390,24 @@ def load_dataset(train_path=None, val_path=None, set_name=None, val_frac=0.1):
         supp_t = supps_t
         #dim_t = pd.concat(dims_t)
         #en_t = np.concat(ens_t)
+    elif len(curve_names) == 1: # Chooses 4MXO saturation curve expt according to set name logic above
+        dim_t = []
+        dim_v = []
+        en_t = []
+        en_v = []
+        curve_folds.remove(val_fold)
+        for t_fold in curve_folds:
+            dim, en = load_dG_dataset(f'data/4MXO_curve_expt/rand_data{str(this_perc)}p/fold{str(t_fold)}.pkl')
+            dim_t.extend(dim)
+            en_t.extend(en)
+        dim, en = load_dG_dataset(curve_names[0])
+        dim_v.extend(dim)
+        en_v.extend(en)
+        #print(dim_t)
+        #print(dim_v)
+        #exit()
 
+        
     elif set_name in binding_db_sets:
         np.random.seed(4202)
         if set_name == "pdbbind-general":
@@ -463,6 +492,7 @@ def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=
     else:
         atom_model = None
     if xfer is not None:
+        xfer = os.path.join('pair_models', xfer)
         pair_model = PairModel(atom_model=atom_model, mode=mode, attention=attention, message_passing=message_passing, dropout=dropout, pair_scale_init=pair_scale_init).from_file(xfer)
     elif delta_base is not None:
         delta_base_model = PairModel(atom_model=atom_model, mode='lig-pair').from_file(delta_base).model
