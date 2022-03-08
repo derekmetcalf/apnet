@@ -134,6 +134,7 @@ class KerasPairModel(tf.keras.Model):
         self.prot_readout = FeedForwardLayer(layer_nodes_readout, layer_activations, f'prot_readout', dropout=self.dropout)
 
         #self.atom_const = tf.Variable(1e-4)
+        #self.atom_const = tf.Variable(1e-5 * 1e-5/self.pair_scale_init)
         self.atom_const = tf.Variable(1e-5)
 
         # if desired, do a simple edge attention layer over the edges

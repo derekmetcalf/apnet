@@ -22,6 +22,11 @@ import tensorflow as tf
 import logging
 tf.get_logger().setLevel(logging.ERROR)
 
+from sklearn import ensemble
+from sklearn.model_selection import train_test_split, GridSearchCV
+from rdkit import Chem
+from rdkit.Chem import AllChem
+
 from apnet import constants
 from multiprocessing import Pool
 from atom_model import AtomModel
@@ -328,19 +333,31 @@ def trainval_warn(val_frac):
         warnings.warn("This dataset has a fixed train/val split, not setting validation fraction.")
     return
 
-def load_dataset(train_path=None, val_path=None, set_name=None, val_frac=0.1):
-    binding_db_sets = ["295", "35", "pdbbind-general"]
+def load_dataset(train_path=None, val_path=None, set_name=None, val_frac=0.1, testing=False):
+    binding_db_sets = []
+    if os.path.isdir("./data/bindingdb-curated"):
+        bindingdb_paths = os.listdir("./data/bindingdb-curated")
+        for bindingdb_path in bindingdb_paths:
+            if "train" in bindingdb_path and os.path.isdir(os.path.join("./data/bindingdb-curated", bindingdb_path)):
+                bdb_setname = bindingdb_path.split('_')[0]
+                binding_db_sets.append(bdb_setname)
+
+    #print(binding_db_sets)
     curve_names = []
-    if "4MXO" in set_name:
-        dat = set_name.split('-')
-        this_perc = int(dat[1])
-        val_fold = int(dat[-1][-1])
-        curve_names.append(f'data/4MXO_curve_expt/rand_data{str(this_perc)}p/fold{val_fold}.pkl')
-        curve_percs = [10, 20, 40, 60, 80, 100]
-        curve_folds = [0, 1, 2, 3, 4]
-        for perc in curve_percs:
-            for fold in curve_folds:
-                curve_strs = f'data/4MXO_curve_expt/rand_data{str(perc)}p/fold{fold}.pkl' 
+    if set_name.split('-')[0] in binding_db_sets:
+        if testing == True:
+            curve_names.append(1)
+        else:
+            dat = set_name.split('-')
+            this_setname = dat[0]
+            this_perc = int(dat[1])
+            val_fold = int(dat[-1][-1])
+            curve_names.append(f'data/bindingdb-curated/{this_setname}_train/{str(this_perc)}/fold{val_fold}.pkl')
+            curve_percs = [20, 40, 60, 80, 100]
+            curve_folds = [0, 1, 2, 3, 4]
+            for perc in curve_percs:
+                for fold in curve_folds:
+                    curve_strs = f'data/bindingdb-curated/{this_setname}_train/{str(perc)}/fold{fold}.pkl' 
 
     dim_t = None
     en_t = None
@@ -363,72 +380,63 @@ def load_dataset(train_path=None, val_path=None, set_name=None, val_frac=0.1):
         trainval_warn(val_frac)
         dim_t, en_t = load_dG_dataset('data/4MXO_target/4MXO_pocket_train/dimers.pkl', poses=1)
         dim_v, en_v = load_dG_dataset('data/4MXO_target/4MXO_pocket_val/dimers.pkl', poses=1)
-    elif set_name == "505":
-        trainval_warn(val_frac)
-        dim_t, en_t = load_dG_dataset('data/sets/505_train/dimers.pkl', poses=1)
-        dim_v, en_v = load_dG_dataset('data/sets/505_val/dimers.pkl', poses=1)
 
     elif set_name in ['pdbbind-0', 'pdbbind-1', 'pdbbind-2', 'pdbbind-3', 'pdbbind-4']:
         val_fold = int(set_name[-1])
         train_folds = [0, 1, 2, 3, 4]
         train_folds.remove(val_fold)
-        dim_v, en_v, supp_v = load_dG_dataset(f'data/pdbbind-xval/fold{val_fold}.pkl')
+        dim_v, en_v = load_dG_dataset(f'data/pdbbind-xval/fold{val_fold}.pkl')
+        #dim_v, en_v, supp_v = load_dG_dataset(f'data/pdbbind-xval/fold{val_fold}.pkl')
         dims_t = []
         ens_t = []
-        supps_t = []
+        #supps_t = []
         for i, fold in enumerate(train_folds):
-            dim, en, supp = load_dG_dataset(f'data/pdbbind-xval/fold{fold}.pkl')
+            dim, en = load_dG_dataset(f'data/pdbbind-xval/fold{fold}.pkl')
+            #dim, en, supp = load_dG_dataset(f'data/pdbbind-xval/fold{fold}.pkl')
             dims_t.extend(dim)
             ens_t.extend(en)
-            supps_t.extend(supp)
+            #supps_t.extend(supp)
         #print(dims_t)
         #print(ens_t)
         #print(supps_t)
         #exit()
         dim_t = dims_t
         en_t = ens_t
-        supp_t = supps_t
+        #supp_t = supps_t
         #dim_t = pd.concat(dims_t)
         #en_t = np.concat(ens_t)
-    elif len(curve_names) == 1: # Chooses 4MXO saturation curve expt according to set name logic above
+
+    elif set_name == "casf2016":
+        dim_v, en_v = load_dG_dataset('data/CASF2016/coreset/pocket_test.pkl')
+        dim_t = dim_v
+        en_t = en_v
+
+    elif len(curve_names) == 1: # Chooses saturation curve expt according to set name logic above
         dim_t = []
         dim_v = []
         en_t = []
         en_v = []
-        curve_folds.remove(val_fold)
-        for t_fold in curve_folds:
-            dim, en = load_dG_dataset(f'data/4MXO_curve_expt/rand_data{str(this_perc)}p/fold{str(t_fold)}.pkl')
-            dim_t.extend(dim)
-            en_t.extend(en)
-        dim, en = load_dG_dataset(curve_names[0])
-        dim_v.extend(dim)
-        en_v.extend(en)
+
+        if testing == True:
+            this_setname = set_name
+            dim, en = load_dG_dataset(f'data/bindingdb-curated/{this_setname}_val/dimers.pkl') 
+            dim_v.extend(dim)
+            en_v.extend(en)
+        else:
+            curve_folds.remove(val_fold)
+            for t_fold in curve_folds:
+                dim, en = load_dG_dataset(f'data/bindingdb-curated/{this_setname}_train/{str(this_perc)}/fold{str(t_fold)}.pkl')
+                dim_t.extend(dim)
+                en_t.extend(en)
+            dim, en = load_dG_dataset(curve_names[0])
+            dim_v.extend(dim)
+            en_v.extend(en)
+
+
         #print(dim_t)
         #print(dim_v)
         #exit()
 
-        
-    elif set_name in binding_db_sets:
-        np.random.seed(4202)
-        if set_name == "pdbbind-general":
-            dim, en = load_dG_dataset(f'data/PDBbind-general-v2020/dimers.pkl', poses=1)
-        else:
-            dim, en = load_dG_dataset(f'data/sets/set{set_name}/dimers.pkl', poses=1)
-        shuffler = np.random.permutation(len(en))
-        dim_shuff = [dim[i] for i in shuffler]
-        en_shuff = [en[i] for i in shuffler]
-        train_len = np.ceil(float(len(en_shuff)) * (1 - val_frac))
-        dim_t = []
-        en_t = []
-        dim_v = []
-        en_v = []
-        for i in range(len(en_shuff)):
-            if i <= train_len:
-                dim_t.append(dim_shuff[i])
-                en_t.append(en_shuff[i])
-            else:
-                dim_v.append(dim_shuff[i])
-                en_v.append(en_shuff[i])
 
     if train_path is not None:
         dim_t, en_t = load_dG_dataset(os.path.join(train_path, 'dimers.pkl'), poses=1)
@@ -436,18 +444,21 @@ def load_dataset(train_path=None, val_path=None, set_name=None, val_frac=0.1):
         dim_v, en_v = load_dG_dataset(os.path.join(val_path, 'dimers.pkl'), poses=1)
     return dim_t, en_t, None, dim_v, en_v, None
 
-def test_dataset(model_path=None, val_path=None, set_name=None):
-    dim_t, en_t, supp_t, dim_v, en_v, supp_v = load_dataset(set_name=set_name)
-    #atom_model = AtomModel().from_file('atom_models/atom_model2')
+def test_dataset(model_path=None, val_path=None, set_name=None, data_loader_v=None, inds_v=None, en_v=None):
+
+    if data_loader_v is None:
+        dim_t, en_t, supp_t, dim_v, en_v, supp_v = load_dataset(set_name=set_name, testing=True)
+        Nv = len(dim_v)
+        inds_v = np.arange(Nv)
+        
+        print("\nProcessing Dataset...", flush=True)
+        time_loaddata_start = time.time()
+        #data_loader_t = apnet.pair_model.PairDataLoader(dim_t, en_t, 5.0, r_cut_im)
+        data_loader_v = apnet.pair_model.PairDataLoader(dim_v, en_v, 5.0, 5.0)
+        dt_loaddata = time.time() - time_loaddata_start
+        print(f"...Done in {dt_loaddata:.2f} seconds", flush=True)
+
     pair_model = PairModel().from_file(model_path)
-    print("\nProcessing Dataset...", flush=True)
-    time_loaddata_start = time.time()
-    Nv = len(dim_v)
-    inds_v = np.arange(Nv)
-    #data_loader_t = apnet.pair_model.PairDataLoader(dim_t, en_t, 5.0, r_cut_im)
-    data_loader_v = apnet.pair_model.PairDataLoader(dim_v, en_v, 5.0, 5.0)
-    dt_loaddata = time.time() - time_loaddata_start
-    print(f"...Done in {dt_loaddata:.2f} seconds", flush=True)
     preds_v = []
     lig_pred_v = []
     pair_pred_v = []
@@ -471,6 +482,8 @@ def test_dataset(model_path=None, val_path=None, set_name=None):
     targets = np.array(target_v)
 
     return preds, labs, lig_preds, pair_preds, sources, targets
+
+
 
 def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=None, pretrained_atom=False, mode='lig', val_frac=0.2, attention=False, lr=0.0001, message_passing=False, dropout=0.2, online_aug=False, pair_scale_init=5e-5):
     dim_t, en_t, supp_t, dim_v, en_v, supp_v = load_dataset(set_name=set_name, val_frac=val_frac)
@@ -515,6 +528,85 @@ def train_single(set_name, modelsuffix=None, epochs=1000, delta_base=None, xfer=
         pair_model.train(dim_t, en_t, dim_v, en_v, n_epochs=epochs, ext_t=ext_t, ext_v=ext_v, learning_rate=lr, online_aug=online_aug)
    
     return pair_model
+
+def make_smis(set_name, val_frac=0.0, testing=False):
+    dim_t, en_t, supp_t, dim_v, en_v, supp_v = load_dataset(set_name=set_name, testing=testing)
+    if testing:
+        dim_it = dim_v
+        en_it = en_v
+    else:
+        dim_it = dim_t
+        en_it = en_t
+    
+    smis = []
+    for i, mol_l in enumerate(dim_it):
+        tmpname = f'tmp{i}.o{set_name}.xyz'
+        if not os.path.exists(tmpname):
+            poss_charges = [0, -1, 1, -2, 2, -3, 3, -4, 4]
+            mol = mol_l[0]
+            molA = mol.get_fragment(0)
+
+            charge = int(molA.molecular_charge)
+            poss_charges.remove(charge)
+            smi = ''
+
+            molA.to_file(tmpname, dtype='xyz')
+            while len(smi) == 0:
+                smi = os.popen(f'python ~/data/gits/xyz2mol/xyz2mol.py {tmpname} --charge {charge}').read().strip('\n') 
+                if charge in poss_charges: poss_charges.remove(charge)
+                charge = poss_charges[0]
+            smis.append(smi)
+    if not testing:
+        dat = set_name.split('-')
+        bdb_set = dat[0]
+        pct_train = dat[1]
+        fold = dat[2]
+        fpath = f'data/bindingdb-curated/{bdb_set}_train/{pct_train}/{fold}.smi'
+    else:
+        fpath = f'data/bindingdb-curated/{set_name}_val/val.smi'
+    with open(fpath, 'a') as smifile:
+        for i, smi in enumerate(smis):
+            smifile.write(f'{smi} {en_it[i]}\n')
+    smifile.close()
+
+    return
+
+def train_2D(set_name, modelsuffix=None):  #TODO: get this to train and predict a gradient-boosted tree for arbitrary systems
+    dat = set_name.split('-')
+    bdb_set = dat[0]
+    pct_train = dat[1]
+    fold = dat[2]
+    fpath = f'data/bindingdb-curated/{bdb_set}_train/{pct_train}/{fold}.smi'
+    smis = []
+    fps = []
+    ens = []
+    with open(fpath, 'r') as smifile:
+        lines = smifile.readlines()
+    smifile.close()
+    for line in lines:
+        dat = line.strip().split()
+        smi = Chem.MolFromSmiles(dat[0])
+        fp = AllChem.GetMorganFingerprintAsBitVect(smi, 2, nBits=1024)
+        array = np.zeros((0, ), dtype=np.int8)
+        Chem.DataStructs.ConvertToNumpyArray(fp, array)
+        smis.append(smi)
+        fps.append(array)
+        ens.append(float(dat[1].strip('\n')))
+    
+    feats = fps
+    
+    params = {'n_estimators': [500],
+          'max_depth': [5],
+          'min_samples_split': [3],
+          'learning_rate': [0.01],
+          'loss': ['ls']}
+
+    model = ensemble.GradientBoostingRegressor()
+    reg = GridSearchCV(model, params)
+    reg.fit(feats, ens)
+    
+    return reg
+
 
 def get_folds(X, y, folds):
     sz = np.ceil(float(len(X)) / float(folds))

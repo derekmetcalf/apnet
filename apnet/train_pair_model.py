@@ -27,7 +27,7 @@ parser.add_argument('--no-mp', dest='mp', action='store_false', help='Disallow m
 parser.set_defaults(mp=False)
 parser.add_argument('--dropout', type=float, default=0.2, help='Fraction of dropout to include on all dense layers')
 parser.add_argument('--online_aug', type=float, default=0.0, help='Whether to use online data augmentation (in this case, small Cartesian noise injection)')
-parser.add_argument('--pair_scale_init', type=float, default=5.e-5, help='Pair energy scaler initialization (trainable)')
+parser.add_argument('--pair_scale_init', type=float, default=1.e-5, help='Pair energy scaler initialization (trainable)')
 
 args = parser.parse_args()
 set_name = args.set
