@@ -385,24 +385,23 @@ class KerasPairModel(tf.keras.Model):
         # run atom-pair features through a dense net to predict dG contributions
         # here, we're doing edge attention to get a system-wide feature vector that is read-out.
         # since we have a canonical protein-ligand choice for A and B, we can do a single pass
-        
+
         sys_feats = hAB
         if self.attention:
             sys_feats = self.edge_attention(hAB)
             #sys_feats = tf.reduce_mean(sys_feats, axis=0)
             sys_feats = tf.expand_dims(sys_feats, axis=0)
-        
-            
+
         #sys_feats = tf.expand_dims(sys_feats, axis=0)
         #pair_pred = self.pair_readout(pair_pred)
 
-        all_lig_pred = self.lig_readout(hA)
-        lig_pred = tf.reduce_sum(all_lig_pred, axis=0) * self.atom_const
-        
+        all_lig_pred = self.lig_readout(hA) * self.atom_const
+        lig_pred = tf.reduce_sum(all_lig_pred, axis=0)
+
         if self.mode != "lig":
             all_pair_pred = self.pair_readout(sys_feats)
             pair_pred = tf.reduce_sum(all_pair_pred, axis=0) * self.pair_const
-            
+
             if self.mode == "prot-lig-pair":
                 prot_pred = self.prot_readout(hB)
                 prot_pred = tf.reduce_sum(prot_pred, axis=0) * self.atom_const

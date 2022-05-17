@@ -381,8 +381,8 @@ def load_dataset(train_path=None, val_path=None, set_name=None, val_frac=0.1, te
         dim_t, en_t = load_dG_dataset('data/4MXO_target/4MXO_pocket_train/dimers.pkl', poses=1)
         dim_v, en_v = load_dG_dataset('data/4MXO_target/4MXO_pocket_val/dimers.pkl', poses=1)
 
-    elif set_name in ['pdbbind-0', 'pdbbind-1', 'pdbbind-2', 'pdbbind-3', 'pdbbind-4']:
-        val_fold = int(set_name[-1])
+    elif set_name[:9] in ['pdbbind-0', 'pdbbind-1', 'pdbbind-2', 'pdbbind-3', 'pdbbind-4']:
+        val_fold = int(set_name[:9][-1])
         train_folds = [0, 1, 2, 3, 4]
         train_folds.remove(val_fold)
         dim_v, en_v = load_dG_dataset(f'data/pdbbind-xval/fold{val_fold}.pkl')
@@ -396,6 +396,10 @@ def load_dataset(train_path=None, val_path=None, set_name=None, val_frac=0.1, te
             dims_t.extend(dim)
             ens_t.extend(en)
             #supps_t.extend(supp)
+        if set_name.endswith('general'):
+            dim, en = load_dG_dataset(f'data/PDBbind-general-v2020/dimers.pkl')
+            dims_t.extend(dim)
+            ens_t.extend(en)
         #print(dims_t)
         #print(ens_t)
         #print(supps_t)
