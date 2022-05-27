@@ -83,7 +83,7 @@ def get_pair(hA, hB, rbf, e_source, e_target):
 
 class KerasPairModel(tf.keras.Model):
 
-    def __init__(self, atom_model=None, n_message=3, n_rbf=8, n_neuron=128, n_embed=8, r_cut_im=8.0, scale_init=-1.e-8, shift_init=7.808, mode='lig-pair', **kwargs):
+    def __init__(self, atom_model=None, n_message=2, n_rbf=8, n_neuron=64, n_embed=8, r_cut_im=5.0, scale_init=-1.e-8, shift_init=7.808, mode='lig-pair', **kwargs):
         super(KerasPairModel, self).__init__()
 
         # pre-trained atomic model for predicting atomic properties
@@ -117,7 +117,7 @@ class KerasPairModel(tf.keras.Model):
         self.scale = tf.Variable(scale_init)
         self.shift = tf.Variable(shift_init)
         if self.delta_model is not None:
-            self.shift = tf.Variable(0.0)
+            self.shift = tf.constant(0.0)
 
         ## pre-trained atomic model for predicting atomic properties
         #self.atom_model = keras.models.load_model("/storage/home/hhive1/zglick3/data/test_apnet/atom_models/atom0/")
@@ -399,8 +399,8 @@ class KerasPairModel(tf.keras.Model):
         lig_pred = tf.reduce_sum(all_lig_pred, axis=0)
 
         if self.mode != "lig":
-            all_pair_pred = self.pair_readout(sys_feats)
-            pair_pred = tf.reduce_sum(all_pair_pred, axis=0) * self.pair_const
+            all_pair_pred = self.pair_readout(sys_feats) * self.pair_const
+            pair_pred = tf.reduce_sum(all_pair_pred, axis=0)
 
             if self.mode == "prot-lig-pair":
                 prot_pred = self.prot_readout(hB)
@@ -414,7 +414,7 @@ class KerasPairModel(tf.keras.Model):
             all_pair_pred = tf.zeros_like(e_ABsr_source, dtype=tf.float32)
         if self.delta_model is not None:
             dG_pred = dG_pred + base_preds
-        return dG_pred, all_lig_pred, all_pair_pred, e_ABsr_source, e_ABsr_target
+        return dG_pred, all_lig_pred, all_pair_pred, e_ABsr_source, e_ABsr_target#, self.atom_const, self.pair_const
 
 
     def get_config(self):
