@@ -344,76 +344,77 @@ def load_dataset(train_path=None, val_path=None, set_name=None, val_frac=0.1, te
 
     #print(binding_db_sets)
     curve_names = []
-    if set_name.split('-')[0] in binding_db_sets:
-        if testing == True:
-            curve_names.append(1)
-        else:
-            dat = set_name.split('-')
-            this_setname = dat[0]
-            this_perc = int(dat[1])
-            val_fold = int(dat[-1][-1])
-            curve_names.append(f'data/bindingdb-curated/{this_setname}_train/{str(this_perc)}/fold{val_fold}.pkl')
-            curve_percs = [20, 40, 60, 80, 100]
-            curve_folds = [0, 1, 2, 3, 4]
-            for perc in curve_percs:
-                for fold in curve_folds:
-                    curve_strs = f'data/bindingdb-curated/{this_setname}_train/{str(perc)}/fold{fold}.pkl' 
+    if set_name is not None:
+        if set_name.split('-')[0] in binding_db_sets:
+            if testing == True:
+                curve_names.append(1)
+            else:
+                dat = set_name.split('-')
+                this_setname = dat[0]
+                this_perc = int(dat[1])
+                val_fold = int(dat[-1][-1])
+                curve_names.append(f'data/bindingdb-curated/{this_setname}_train/{str(this_perc)}/fold{val_fold}.pkl')
+                curve_percs = [20, 40, 60, 80, 100]
+                curve_folds = [0, 1, 2, 3, 4]
+                for perc in curve_percs:
+                    for fold in curve_folds:
+                        curve_strs = f'data/bindingdb-curated/{this_setname}_train/{str(perc)}/fold{fold}.pkl' 
 
-    dim_t = None
-    en_t = None
-    dim_v = None
-    en_v = None
-    if set_name == "pdbbind_multi":
-        trainval_warn(val_frac)
-        dim_t, en_t = load_dG_dataset('data/pdbbind_multi_train.pkl', poses=1)
-        dim_v, en_v = load_dG_dataset('data/pdbbind_multi_val.pkl', poses=1)
-    elif set_name == "pdbbind":
-        trainval_warn(val_frac)
-        dim_t, en_t, supp_t = load_dG_dataset('data/pdbbind_pocket_train.pkl', poses=1)
-        dim_v, en_v, supp_v = load_dG_dataset('data/pdbbind_pocket_val.pkl', poses=1)
-        return dim_t, en_t, supp_t, dim_v, en_v, supp_t
-    elif set_name == "pdbbind_multi_smol":    
-        trainval_warn(val_frac)
-        dim_t, en_t = load_dG_dataset('data/pdbbind_multi_smol.pkl', poses=1)
-        dim_v, en_v = load_dG_dataset('data/pdbbind_multi_smol.pkl', poses=1)
-    elif set_name == "4MXO":
-        trainval_warn(val_frac)
-        dim_t, en_t = load_dG_dataset('data/4MXO_target/4MXO_pocket_train/dimers.pkl', poses=1)
-        dim_v, en_v = load_dG_dataset('data/4MXO_target/4MXO_pocket_val/dimers.pkl', poses=1)
+        dim_t = None
+        en_t = None
+        dim_v = None
+        en_v = None
+        if set_name == "pdbbind_multi":
+            trainval_warn(val_frac)
+            dim_t, en_t = load_dG_dataset('data/pdbbind_multi_train.pkl', poses=1)
+            dim_v, en_v = load_dG_dataset('data/pdbbind_multi_val.pkl', poses=1)
+        elif set_name == "pdbbind":
+            trainval_warn(val_frac)
+            dim_t, en_t, supp_t = load_dG_dataset('data/pdbbind_pocket_train.pkl', poses=1)
+            dim_v, en_v, supp_v = load_dG_dataset('data/pdbbind_pocket_val.pkl', poses=1)
+            return dim_t, en_t, supp_t, dim_v, en_v, supp_t
+        elif set_name == "pdbbind_multi_smol":    
+            trainval_warn(val_frac)
+            dim_t, en_t = load_dG_dataset('data/pdbbind_multi_smol.pkl', poses=1)
+            dim_v, en_v = load_dG_dataset('data/pdbbind_multi_smol.pkl', poses=1)
+        elif set_name == "4MXO":
+            trainval_warn(val_frac)
+            dim_t, en_t = load_dG_dataset('data/4MXO_target/4MXO_pocket_train/dimers.pkl', poses=1)
+            dim_v, en_v = load_dG_dataset('data/4MXO_target/4MXO_pocket_val/dimers.pkl', poses=1)
 
-    elif set_name[:9] in ['pdbbind-0', 'pdbbind-1', 'pdbbind-2', 'pdbbind-3', 'pdbbind-4']:
-        val_fold = int(set_name[:9][-1])
-        train_folds = [0, 1, 2, 3, 4]
-        train_folds.remove(val_fold)
-        dim_v, en_v = load_dG_dataset(f'data/pdbbind-xval/fold{val_fold}.pkl')
-        #dim_v, en_v, supp_v = load_dG_dataset(f'data/pdbbind-xval/fold{val_fold}.pkl')
-        dims_t = []
-        ens_t = []
-        #supps_t = []
-        for i, fold in enumerate(train_folds):
-            dim, en = load_dG_dataset(f'data/pdbbind-xval/fold{fold}.pkl')
-            #dim, en, supp = load_dG_dataset(f'data/pdbbind-xval/fold{fold}.pkl')
-            dims_t.extend(dim)
-            ens_t.extend(en)
-            #supps_t.extend(supp)
-        if set_name.endswith('general'):
-            dim, en = load_dG_dataset(f'data/PDBbind-general-v2020/dimers.pkl')
-            dims_t.extend(dim)
-            ens_t.extend(en)
-        #print(dims_t)
-        #print(ens_t)
-        #print(supps_t)
-        #exit()
-        dim_t = dims_t
-        en_t = ens_t
-        #supp_t = supps_t
-        #dim_t = pd.concat(dims_t)
-        #en_t = np.concat(ens_t)
+        elif set_name[:9] in ['pdbbind-0', 'pdbbind-1', 'pdbbind-2', 'pdbbind-3', 'pdbbind-4']:
+            val_fold = int(set_name[:9][-1])
+            train_folds = [0, 1, 2, 3, 4]
+            train_folds.remove(val_fold)
+            dim_v, en_v, supp_v = load_dG_dataset(f'data/pdbbind-xval/fold{val_fold}.pkl')
+            #dim_v, en_v, supp_v = load_dG_dataset(f'data/pdbbind-xval/fold{val_fold}.pkl')
+            dims_t = []
+            ens_t = []
+            #supps_t = []
+            for i, fold in enumerate(train_folds):
+                dim, en, supp= load_dG_dataset(f'data/pdbbind-xval/fold{fold}.pkl')
+                #dim, en, supp = load_dG_dataset(f'data/pdbbind-xval/fold{fold}.pkl')
+                dims_t.extend(dim)
+                ens_t.extend(en)
+                #supps_t.extend(supp)
+            if set_name.endswith('general'):
+                dim, en = load_dG_dataset(f'data/PDBbind-general-v2020/dimers.pkl')
+                dims_t.extend(dim)
+                ens_t.extend(en)
+            #print(dims_t)
+            #print(ens_t)
+            #print(supps_t)
+            #exit()
+            dim_t = dims_t
+            en_t = ens_t
+            #supp_t = supps_t
+            #dim_t = pd.concat(dims_t)
+            #en_t = np.concat(ens_t)
 
-    elif set_name == "casf2016":
-        dim_v, en_v = load_dG_dataset('data/CASF2016/coreset/pocket_test.pkl')
-        dim_t = dim_v
-        en_t = en_v
+        elif set_name == "casf2016":
+            dim_v, en_v = load_dG_dataset('data/CASF2016/coreset/pocket_test.pkl')
+            dim_t = dim_v
+            en_t = en_v
 
     elif len(curve_names) == 1: # Chooses saturation curve expt according to set name logic above
         dim_t = []
@@ -484,6 +485,10 @@ def test_dataset(model_path=None, val_path=None, set_name=None, data_loader_v=No
     pair_preds = np.array(pair_pred_v)
     sources = np.array(source_v)
     targets = np.array(target_v)
+    #pair_const = float(pair_model.pair_const)
+    #atom_const = float(pair_model.atom_const)
+    #lig_preds *= atom_const
+    #pair_preds *= pair_const
 
     return preds, labs, lig_preds, pair_preds, sources, targets
 

@@ -342,7 +342,7 @@ class PairModel:
         # todo : better atom_model handling
         self.atom_model = atom_model
         self.delta_base = delta_base
-        self.message_passing = kwargs.get("message_passing", False)
+        self.message_passing = kwargs.get("message_passing", True)
         self.attention = kwargs.get("attention", False)
         self.dropout = kwargs.get("dropout", 0.2)
         self.pair_scale_init = kwargs.get("pair_scale_init", 5e-5)

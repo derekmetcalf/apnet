@@ -99,7 +99,7 @@ class KerasPairModel(tf.keras.Model):
         self.r_cut_im = r_cut_im
         self.mode = mode
         self.attention = kwargs.get("attention", False)
-        self.message_pass = kwargs.get("message_passing", False)
+        self.message_pass = kwargs.get("message_passing", True)
         self.dropout = kwargs.get("dropout", 0.2)
         self.pair_scale_init = kwargs.get("pair_scale_init", 5e-5)
         self.delta_model = kwargs.get("delta_model", None)

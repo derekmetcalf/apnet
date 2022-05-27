@@ -20,6 +20,7 @@ mode = args.mode
 if __name__ == "__main__":
 
     preds, labs, ligpred, pairpred, source, target = apnet.util.test_dataset(set_name=val_path, model_path=model_path)
+
     ens_preds = np.squeeze(np.array(preds))
     labs = np.array(labs)
     avg_preds = np.mean(ens_preds, axis=0)
@@ -30,4 +31,5 @@ if __name__ == "__main__":
     np.save(f'{model_path}_pair_preds.npy', pairpred)
     np.save(f'{model_path}_sources.npy', source)
     np.save(f'{model_path}_targets.npy', target)
+    
     print(f'Predictions on {val_path} saved to {model_path}_test_preds.npy')

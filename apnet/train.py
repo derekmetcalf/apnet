@@ -14,7 +14,7 @@ parser.add_argument('validation_path', help='[string] Path to validation pkl fil
 parser.add_argument('model_name', help='[string] Model name for saving')
 parser.add_argument('mode', help='[string] Model mode from [lig, lig-pair, lig-pair-prot]')
 parser.add_argument('epochs', help='number of epochs')
-parser.add_argument('xfer_path', default=None, help='[string] Path to model to transfer learn from')
+parser.add_argument('--xfer_path', required=False, default=None, help='[string] Path to model to transfer learn from')
 
 args = parser.parse_args(sys.argv[1:])
 train_path = args.training_path

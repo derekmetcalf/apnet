@@ -37,3 +37,11 @@ Now, `test.py` can be used to infer with a model on a new dataset. Here, we'll u
 ```
 >>> python test.py data/sets/505_val pair_models/example_model lig-pair
 ```
+
+You may also want to tune a pretrained model on a new dataset in a transfer learning manner. This is easily achieved by using the `--xfer path` keyword in the `train.py` script:
+
+```
+>>> python train.py data/sets/505_train data/sets/505_val xfer-example-model lig-pair 500 --xfer_path pair_models/pdbbind-pretrained-eg
+```
+
+`pdbbind-pretrained-eg` is a general protein-ligand model trained on PDBBind, and the above script attempts to transfer learn toward a local dataset containing a single protein and several congeneric ligands.
