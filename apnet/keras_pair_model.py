@@ -198,7 +198,6 @@ class KerasPairModel(tf.keras.Model):
         T2 = 3 * tf.einsum('xy,xz->xyz', dR_xyz, dR_xyz) - tf.einsum('x,x,yz->xyz', dR, dR, delta)
         T2 = tf.einsum('x,xyz->xyz', oodR ** 5, T2)
 
-        # this is basically zero?
         E_uu = -1.0 * tf.einsum('xy,xz,xyz->x', muA_source, muB_source, T2)
 
         qA_quadB_source = tf.einsum('x,xyz->xyz', qA_source, quadB_source)
@@ -206,8 +205,6 @@ class KerasPairModel(tf.keras.Model):
         E_qQ = tf.einsum('xyz,xyz->x', T2, qA_quadB_source + qB_quadA_source) / 3.0
 
         E_elst =  627.509 * (E_qq + E_qu + E_qQ + E_uu)
-        #E_elst =  627.509 * (E_qq + E_qu)
-        #E_elst =  627.509 * (E_qq + E_qu + E_uu)
 
         return E_elst
 
