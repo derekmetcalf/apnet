@@ -445,14 +445,20 @@ def load_dataset(train_path=None, val_path=None, set_name=None, val_frac=0.1, te
 
     if train_path is not None:
         dim_t, en_t = load_dG_dataset(os.path.join(train_path, 'dimers.pkl'), poses=1)
+    else:
+        dim_t = None
+        en_t = None
     if val_path is not None:
         dim_v, en_v = load_dG_dataset(os.path.join(val_path, 'dimers.pkl'), poses=1)
+    else:
+        dim_v = None
+        en_v = None
     return dim_t, en_t, None, dim_v, en_v, None
 
 def test_dataset(model_path=None, val_path=None, set_name=None, data_loader_v=None, inds_v=None, en_v=None):
 
     if data_loader_v is None:
-        dim_t, en_t, supp_t, dim_v, en_v, supp_v = load_dataset(set_name=set_name, testing=True)
+        dim_t, en_t, supp_t, dim_v, en_v, supp_v = load_dataset(val_path=val_path, set_name=set_name, testing=True)
         Nv = len(dim_v)
         inds_v = np.arange(Nv)
         
@@ -464,33 +470,37 @@ def test_dataset(model_path=None, val_path=None, set_name=None, data_loader_v=No
         print(f"...Done in {dt_loaddata:.2f} seconds", flush=True)
 
     pair_model = PairModel().from_file(model_path)
-    preds_v = []
-    lig_pred_v = []
-    pair_pred_v = []
-    source_v = []
-    target_v = []
-    energy_v = en_v
+    preds = []
+    lig_preds = []
+    pair_preds = []
+    sources = []
+    targets = []
+    labs = en_v
+    pair_scale = pair_model.model.pair_const.numpy()
+    shift = pair_model.model.shift.numpy()
+    #print(dir(pair_model.model))
+    #exit()
     for inds in inds_v:
         inp_v_chunk = data_loader_v.get_data([inds])
         outs_v = pair_model.model(inp_v_chunk[0])
-        preds_v.append(outs_v[0])
-        lig_pred_v.append(outs_v[1])
-        pair_pred_v.append(outs_v[2])
-        source_v.append(outs_v[3])
-        target_v.append(outs_v[4])
+        preds.append(outs_v[0].numpy())
+        lig_preds.append(outs_v[1].numpy())
+        pair_preds.append(outs_v[2].numpy())
+        sources.append(outs_v[3].numpy())
+        targets.append(outs_v[4].numpy())
 
-    preds = np.array(preds_v)
-    labs = np.array(energy_v)
-    lig_preds = np.array(lig_pred_v)
-    pair_preds = np.array(pair_pred_v)
-    sources = np.array(source_v)
-    targets = np.array(target_v)
+    #preds = np.array(preds_v)
+    #labs = np.array(energy_v)
+    #lig_preds = np.array(lig_pred_v)
+    #pair_preds = np.array(pair_pred_v)
+    #sources = np.array(source_v)
+    #targets = np.array(target_v)
     #pair_const = float(pair_model.pair_const)
     #atom_const = float(pair_model.atom_const)
     #lig_preds *= atom_const
     #pair_preds *= pair_const
 
-    return preds, labs, lig_preds, pair_preds, sources, targets
+    return preds, labs, lig_preds, pair_preds, sources, targets, shift, pair_scale
 
 
 

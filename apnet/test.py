@@ -1,5 +1,6 @@
 import os, sys
 
+import pickle
 import apnet
 import argparse
 import pandas as pd
@@ -19,17 +20,21 @@ mode = args.mode
 
 if __name__ == "__main__":
 
-    preds, labs, ligpred, pairpred, source, target = apnet.util.test_dataset(set_name=val_path, model_path=model_path)
+    preds, labs, ligpred, pairpred, source, target, shift, pairscale = apnet.util.test_dataset(val_path=val_path, model_path=model_path)
 
-    ens_preds = np.squeeze(np.array(preds))
-    labs = np.array(labs)
+    ens_preds = np.squeeze(preds)
     avg_preds = np.mean(ens_preds, axis=0)
     pred_unc = np.std(ens_preds, axis=0)
-    np.save(f'{model_path}_test_preds.npy', ens_preds)
-    np.save(f'{model_path}_test_labs.npy', labs)
-    np.save(f'{model_path}_lig_preds.npy', ligpred)
-    np.save(f'{model_path}_pair_preds.npy', pairpred)
-    np.save(f'{model_path}_sources.npy', source)
-    np.save(f'{model_path}_targets.npy', target)
-    
-    print(f'Predictions on {val_path} saved to {model_path}_test_preds.npy')
+    model_info = {"test_preds" : ens_preds,
+                  "test_labs"  : labs,
+                  "lig_preds"  : ligpred,
+                  "pair_preds" : pairpred,
+                  "source"     : source,
+                  "target"     : target,
+                  "shift"      : shift,
+                  "pair_scale" : pairscale,
+                  }
+    with open(f'{model_path}_pred_info.pkl', 'wb') as outf:
+        pickle.dump(model_info, outf)
+    outf.close()
+    print(f'Predictions and metadata on {val_path} saved to {model_path}_pred_info.pkl')
