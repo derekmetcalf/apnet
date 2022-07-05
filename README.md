@@ -35,7 +35,7 @@ This trains a model for 500 epochs in lig-pair mode (Do `>>> python train.py -h`
 
 Now, `test.py` can be used to infer with a model on a new dataset. Here, we'll use it to re-infer on the validation set and save the outputs to numpy arrays:
 ```
->>> python test.py data/sets/505_val pair_models/example_model lig-pair
+>>> python test.py data/sets/505_val pair_models/example-model lig-pair
 ```
 
 You may also want to tune a pretrained model on a new dataset in a transfer learning manner. This is easily achieved by using the `--xfer path` keyword in the `train.py` script:
