@@ -416,7 +416,7 @@ def load_dataset(train_path=None, val_path=None, set_name=None, val_frac=0.1, te
             dim_t = dim_v
             en_t = en_v
 
-    elif len(curve_names) == 1: # Chooses saturation curve expt according to set name logic above
+    if len(curve_names) == 1: # Chooses saturation curve expt according to set name logic above
         dim_t = []
         dim_v = []
         en_t = []
@@ -436,6 +436,7 @@ def load_dataset(train_path=None, val_path=None, set_name=None, val_frac=0.1, te
             dim, en = load_dG_dataset(curve_names[0])
             dim_v.extend(dim)
             en_v.extend(en)
+        return dim_t, en_t, None, dim_v, en_v, None
 
 
         #print(dim_t)

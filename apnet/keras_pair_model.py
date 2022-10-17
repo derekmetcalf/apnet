@@ -117,7 +117,7 @@ class KerasPairModel(tf.keras.Model):
         self.scale = tf.Variable(scale_init)
         self.shift = tf.Variable(shift_init)
         if self.delta_model is not None:
-            self.shift = tf.constant(0.0)
+            self.shift = tf.Variable(0.0)
 
         ## pre-trained atomic model for predicting atomic properties
         #self.atom_model = keras.models.load_model("/storage/home/hhive1/zglick3/data/test_apnet/atom_models/atom0/")
@@ -410,8 +410,8 @@ class KerasPairModel(tf.keras.Model):
             dG_pred = lig_pred + self.shift
             all_pair_pred = tf.zeros_like(e_ABsr_source, dtype=tf.float32)
         if self.delta_model is not None:
-            dG_pred = dG_pred + base_preds
-        return dG_pred, all_lig_pred, all_pair_pred, e_ABsr_source, e_ABsr_target#, self.atom_const, self.pair_const
+            dG_pred = dG_pred + base_preds + self.shift
+        return dG_pred, all_lig_pred, all_pair_pred, e_ABsr_source, e_ABsr_target
 
 
     def get_config(self):

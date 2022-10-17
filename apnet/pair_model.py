@@ -605,7 +605,7 @@ class PairModel:
         dt_loaddata = time.time() - time_loaddata_start
         print(f"...Done in {dt_loaddata:.2f} seconds", flush=True)
 
-        print("\nPredicting Interaction Energies...", flush=True)
+        print("\nPredicting outputs...", flush=True)
         time_predenergy_start = time.time()
         inp_chunks = data_loader.get_data(inds)
         outs = [test_batch(self.model, [inp_i]) for inp_i in inp_chunks]
