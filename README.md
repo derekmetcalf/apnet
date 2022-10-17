@@ -1,6 +1,6 @@
-# AP-Net-dG
+# Dr$\Delta$G-Net
 
-AP-Net-dG is a python package for modeling binding free energies and other properties of ligands and proteins.
+Dr$\Delta$G-Net is a python package for modeling binding free energies and other properties of ligands and proteins.
 
 ## Getting Started
 
@@ -9,8 +9,8 @@ AP-Net-dG is a python package for modeling binding free energies and other prope
 It is strongly recommended that you install this package in some kind of virtual environment (like a conda environment).
 Create and activate a new conda environment with the following commands:
 ```
->>> conda create --name apnet python=3.8
->>> conda activate apnet
+>>> conda create --name dragnet python=3.8
+>>> conda activate dragnet
 ```
 #### Installation
 
