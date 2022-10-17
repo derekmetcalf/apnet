@@ -1,6 +1,6 @@
-# Dr$\Delta$G-Net
+# Dragnet
 
-Dr$\Delta$G-Net is a python package for modeling binding free energies and other properties of ligands and proteins.
+Dragnet (Directional \Delta G Neural Network) is a python package for modeling binding free energies and other properties of ligands and proteins.
 
 ## Getting Started
 
